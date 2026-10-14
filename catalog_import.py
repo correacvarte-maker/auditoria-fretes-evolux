@@ -57,6 +57,47 @@ def read_quote(body):
     return cost, weight, 'Cotação atual da API; não é débito de uma venda'
 
 
+def package_dimensions(item):
+    values = {}
+    for attribute in item.get('attributes', []):
+        key = attribute.get('id', '').removeprefix('SELLER_PACKAGE_').lower()
+        if key not in ('height', 'width', 'length', 'weight'):
+            continue
+        structured = attribute.get('value_struct') or {}
+        raw = str(attribute.get('value_name') or '')
+        match = re.fullmatch(r'\s*(\d+(?:[.,]\d+)?)\s*(cm|mm|m|kg|g)\s*', raw)
+        amount, unit = (structured.get('number'), structured.get('unit')) if structured else (
+            (match.group(1).replace(',', '.'), match.group(2)) if match else (None, None))
+        try:
+            amount = Decimal(str(amount))
+            factors = {'g': Decimal(1), 'kg': Decimal(1000)} if key == 'weight' else {
+                'cm': Decimal(1), 'm': Decimal(100), 'mm': Decimal('.1')}
+            value = amount * factors[unit]
+            if value.is_finite() and value > 0:
+                values[key] = value
+        except (InvalidOperation, KeyError, TypeError, ValueError):
+            pass
+    if len(values) == 4:
+        return f"{values['height']}x{values['width']}x{values['length']},{int(values['weight'].to_integral_value())}"
+    raw_shipping = str((item.get('shipping') or {}).get('dimensions') or '')
+    if re.fullmatch(r'\d+(?:\.\d+)?x\d+(?:\.\d+)?x\d+(?:\.\d+)?,\d+', raw_shipping):
+        return raw_shipping
+    return None
+
+
+def safe_api_error(error):
+    # Return only a small machine code, never response messages, URLs or tokens.
+    try:
+        body = error.response.json()
+        code = body.get('code') or body.get('error')
+        if code in ('PA_UNAUTHORIZED_RESULT_FROM_POLICIES', 'forbidden', 'unauthorized',
+                    'bad_request', 'not_found', 'invalid_token', 'invalid_scope'):
+            return code
+    except (ValueError, AttributeError, TypeError):
+        pass
+    return 'sem código público de diagnóstico'
+
+
 def run_import(factory, cipher, token_request, store_tokens, run_id, seller_id):
     def progress(**values):
         with factory.begin() as db:
@@ -93,7 +134,10 @@ def run_import(factory, cipher, token_request, store_tokens, run_id, seller_id):
         if shipping.get('mode') != 'me2':
             return None, None, 'Cotação indisponível para esta modalidade de envio'
         params = {'item_id': item['id'], 'verbose': 'true',
-                  'free_shipping': 'true' if shipping.get('free_shipping') else 'false'}
+                  'free_shipping': 'True' if shipping.get('free_shipping') else 'False',
+                  'item_price': item.get('price'), 'listing_type_id': item.get('listing_type_id'),
+                  'mode': shipping.get('mode'), 'logistic_type': shipping.get('logistic_type'),
+                  'condition': item.get('condition', 'new')}
         if reference:
             params.pop('item_id')
             params.update(dimensions=f'{reference.height}x{reference.width}x{reference.length},{int(reference.weight * 1000)}',
@@ -105,7 +149,20 @@ def run_import(factory, cipher, token_request, store_tokens, run_id, seller_id):
         except requests.HTTPError as error:
             code = error.response.status_code if error.response is not None else 0
             if code in (400, 403, 404):
-                return None, None, 'API não disponibilizou esta cotação (HTTP ' + str(code) + ')'
+                diagnostic = safe_api_error(error)
+                dimensions = package_dimensions(item) if not reference else None
+                if dimensions:
+                    # A second documented quote form supplies complete measured context.
+                    dimensions_params = {key: value for key, value in params.items() if key != 'item_id'}
+                    dimensions_params['dimensions'] = dimensions
+                    try:
+                        return read_quote(api_get('/users/' + seller_id + '/shipping_options/free', dimensions_params))
+                    except requests.HTTPError as contextual_error:
+                        code = contextual_error.response.status_code if contextual_error.response is not None else 0
+                        diagnostic = safe_api_error(contextual_error)
+                        if code not in (400, 403, 404):
+                            raise
+                return None, None, f'Cotação recusada pela API: HTTP {code} · {diagnostic}'[:180]
             raise
 
     try:
