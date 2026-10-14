@@ -90,6 +90,9 @@ def create_app(config=None):
                 abort(400, 'Formulário expirado. Recarregue a página.')
             origin = request.headers.get('Origin')
             if origin and origin != base:
+                origin_parts = urlparse(origin)
+                app.logger.warning('Form origin mismatch: opaque=%s, scheme=%r, host=%r',
+                                   origin == 'null', origin_parts.scheme, origin_parts.hostname)
                 abort(403)
 
     @app.after_request
