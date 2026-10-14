@@ -307,10 +307,13 @@ def create_app(config=None):
                             verifier=cipher.encrypt(verifier.encode()).decode(), expires=int(time.time()) + 600))
         g.db.commit()
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
-        return redirect('https://auth.mercadolivre.com.br/authorization?' + urlencode({
+        authorization_url = 'https://auth.mercadolivre.com.br/authorization?' + urlencode({
             'response_type': 'code', 'client_id': app.config['MELI_CLIENT_ID'],
             'redirect_uri': base + '/oauth/callback', 'state': state,
-            'code_challenge': challenge, 'code_challenge_method': 'S256'}))
+            'code_challenge': challenge, 'code_challenge_method': 'S256'})
+        # A navigation link avoids browser CSP form-action checks on cross-origin
+        # redirects after POST, while keeping all form submissions same-origin.
+        return render_template('authorize_connection.html', authorization_url=authorization_url)
 
     @app.get('/oauth/callback')
     @protected
