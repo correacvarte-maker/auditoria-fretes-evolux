@@ -12,7 +12,7 @@ from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 
 from app import create_app, digest
-from models import BrowserSession, Connection, Freight, Listing, OAuthState
+from models import BrowserSession, Connection, PendingConnection, Freight, Listing, OAuthState
 
 
 @pytest.fixture
@@ -192,3 +192,56 @@ def test_refresh_rotation_and_listing_ownership(app, client, monkeypatch):
 def test_production_rejects_sqlite(app):
     with pytest.raises(RuntimeError, match='PostgreSQL'):
         create_app({**app.config, 'APP_ENV': 'production', 'PUBLIC_BASE_URL': 'https://example.com'})
+
+
+def test_first_seller_requires_session_confirmation_and_stays_pinned(app, client, monkeypatch):
+    app.config['MELI_SELLER_ID'] = ''
+    login(client)
+    monkeypatch.setattr('app.requests.post', lambda *a, **k: FakeResponse({
+        'access_token': 'pending-access', 'refresh_token': 'pending-refresh', 'expires_in': 21600}))
+    monkeypatch.setattr('app.requests.get', lambda *a, **k: FakeResponse({'id': 456, 'nickname': 'EVOLUX'}))
+    state = oauth_state(client)
+    response = client.get('/oauth/callback?code=x&state=' + state)
+    assert response.status_code == 302 and response.location.endswith('/oauth/confirm')
+    page = client.get('/oauth/confirm').get_data(as_text=True)
+    assert 'EVOLUX' in page and '456' in page and 'pending-access' not in page
+    with app.extensions['db_factory']() as db:
+        assert db.get(Connection, 1) is None
+        candidate = db.get(PendingConnection, digest(client.get_cookie('evolux_session').value))
+        assert candidate.access != 'pending-access'
+    other = app.test_client()
+    login(other)
+    assert other.get('/oauth/confirm').status_code == 409
+    assert client.post('/oauth/confirm').status_code == 400
+    assert post(client, '/oauth/confirm', {}).status_code == 302
+    assert post(client, '/oauth/confirm', {}).status_code == 409
+    catalog(client)
+    monkeypatch.setattr('app.requests.get', lambda *a, **k: FakeResponse({
+        'id': 'MLB123456789', 'seller_id': 456, 'title': 'Consulta autorizada'}))
+    assert post(client, '/listings/1/sync', {}).status_code == 302
+    state = oauth_state(client)
+    monkeypatch.setattr('app.requests.get', lambda *a, **k: FakeResponse({'id': 999, 'nickname': 'OUTRO'}))
+    assert client.get('/oauth/callback?code=x&state=' + state).status_code == 403
+    with app.extensions['db_factory']() as db:
+        assert db.get(Connection, 1).seller_id == '456'
+        assert db.get(PendingConnection, digest(client.get_cookie('evolux_session').value)) is None
+
+
+def test_pending_seller_expiry_and_cancellation(app, client, monkeypatch):
+    app.config['MELI_SELLER_ID'] = ''
+    login(client)
+    monkeypatch.setattr('app.requests.post', lambda *a, **k: FakeResponse({
+        'access_token': 'pending-access', 'refresh_token': 'pending-refresh', 'expires_in': 21600}))
+    monkeypatch.setattr('app.requests.get', lambda *a, **k: FakeResponse({'id': 456, 'nickname': 'EVOLUX'}))
+    state = oauth_state(client)
+    assert client.get('/oauth/callback?code=x&state=' + state).status_code == 302
+    session_id = digest(client.get_cookie('evolux_session').value)
+    with app.extensions['db_factory'].begin() as db:
+        db.get(PendingConnection, session_id).confirm_until = int(time.time()) - 1
+    assert post(client, '/oauth/confirm', {}).status_code == 409
+    state = oauth_state(client)
+    assert client.get('/oauth/callback?code=x&state=' + state).status_code == 302
+    assert post(client, '/oauth/cancel', {}).status_code == 302
+    with app.extensions['db_factory']() as db:
+        assert db.get(PendingConnection, session_id) is None
+        assert db.get(Connection, 1) is None
