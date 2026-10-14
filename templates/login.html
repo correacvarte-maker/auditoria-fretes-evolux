@@ -1,0 +1,3 @@
+{% extends 'base.html' %}{% block content %}
+<section class="login"><h2>Acesso ao painel</h2><p>Entre com sua conta de administração.</p>{% if error %}<p role="alert" class="alert">{{ error }}</p>{% endif %}<form method="post"><input type="hidden" name="csrf" value="{{ g.browser.csrf }}"><label>Usuário<input name="username" autocomplete="username" maxlength="80" required></label><label>Senha<input type="password" name="password" autocomplete="current-password" maxlength="1024" required></label><button>Entrar</button></form></section>
+{% endblock %}
