@@ -1,7 +1,7 @@
 # Validação do MVP — 14/10/2026
 
 - Acesso de leitura ao repositório confirmado; branch `main`, revisão inicial `d109ff4686f676872ab901bea3a716fa05a87f18`.
-- Nove testes automatizados passaram após atualizar as dependências: login/rotação/logout e cabeçalhos; CSRF/origem/host/bloqueio; expiração de sessão; valores monetários/duplicidade/escape de HTML; vários MLBs por SKU e proteção do histórico; OAuth ligado à sessão/de uso único/criptografia; expiração de state e vendedor incorreto; renovação de token/propriedade do anúncio; recusa de SQLite em produção.
+- A suíte automatizada cobre login/rotação/logout e cabeçalhos; CSRF/origem/host/bloqueio; expiração de sessão; valores monetários/duplicidade/escape de HTML; vários MLBs por SKU e proteção do histórico; OAuth ligado à sessão/de uso único/criptografia; expiração de state e vendedor incorreto; renovação de token/propriedade do anúncio; recusa de SQLite em produção. A identificação inicial do vendedor pelo OAuth acrescenta testes de confirmação na mesma sessão, expiração, cancelamento, criptografia e bloqueio de troca de conta nas reconexões.
 - `pip-audit -r requirements.txt`: nenhuma vulnerabilidade conhecida encontrada na consulta realizada. Isso é uma checagem de dependências, não uma auditoria completa do sistema.
 - Modelos e páginas foram exercitados pelo cliente de testes Flask. PostgreSQL real, runtime Linux/Gunicorn, login via HTTPS e endpoint `/health` foram verificados no Render. Locks concorrentes e API real do Mercado Livre ainda precisam de validação.
 - Testes automatizados usam dados e respostas de API artificiais. As credenciais reais do deploy foram configuradas no Render e guardadas em arquivos privados fora deste repositório. Nenhum token ou segredo real foi publicado no GitHub.

@@ -36,6 +36,17 @@ class Connection(Base):
     expires = Column(Integer, nullable=False)
 
 
+class PendingConnection(Base):
+    __tablename__ = 'pending_meli_connections'
+    session_id = Column(String(64), primary_key=True)
+    seller_id = Column(String(32), nullable=False)
+    nickname = Column(String(120), nullable=False)
+    access = Column(Text, nullable=False)
+    refresh = Column(Text, nullable=False)
+    expires = Column(Integer, nullable=False)
+    confirm_until = Column(Integer, nullable=False)
+
+
 class Product(Base):
     __tablename__ = 'products'
     id = Column(Integer, primary_key=True)

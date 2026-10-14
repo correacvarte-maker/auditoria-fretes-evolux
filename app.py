@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import check_password_hash
 
-from models import Base, BrowserSession, LoginGuard, OAuthState, Connection, Product, AdTemplate, Listing, Freight
+from models import Base, BrowserSession, LoginGuard, OAuthState, Connection, PendingConnection, Product, AdTemplate, Listing, Freight
 
 
 def digest(value):
@@ -82,6 +82,7 @@ def create_app(config=None):
             g.db.add(browser)
             g.db.execute(delete(BrowserSession).where(BrowserSession.expires <= now))
             g.db.execute(delete(OAuthState).where(OAuthState.expires <= now))
+            g.db.execute(delete(PendingConnection).where(PendingConnection.confirm_until <= now))
             g.db.commit()
             g.cookie = raw
         g.browser = browser
@@ -158,6 +159,7 @@ def create_app(config=None):
                 if valid and len(password) <= 1024 and hmac.compare_digest(digest(request.form.get('username', '')), digest(app.config['ADMIN_USERNAME'])):
                     guard.failures = 0
                     g.db.execute(delete(OAuthState).where(OAuthState.session_id == g.browser.id))
+                    g.db.execute(delete(PendingConnection).where(PendingConnection.session_id == g.browser.id))
                     g.db.delete(g.browser)
                     raw = secrets.token_urlsafe(32)
                     g.browser = BrowserSession(id=digest(raw), csrf=secrets.token_urlsafe(32), authenticated=1, expires=now + 3600)
@@ -176,6 +178,7 @@ def create_app(config=None):
     @protected
     def logout():
         g.db.execute(delete(OAuthState).where(OAuthState.session_id == g.browser.id))
+        g.db.execute(delete(PendingConnection).where(PendingConnection.session_id == g.browser.id))
         g.db.delete(g.browser)
         g.db.commit()
         response = redirect(url_for('login'))
@@ -276,7 +279,7 @@ def create_app(config=None):
         return redirect(url_for('dashboard', message='Frete registrado.'))
 
     def oauth_ready():
-        return all(app.config[k] for k in ('MELI_CLIENT_ID', 'MELI_CLIENT_SECRET', 'MELI_SELLER_ID'))
+        return all(app.config[k] for k in ('MELI_CLIENT_ID', 'MELI_CLIENT_SECRET'))
 
     def token_request(data):
         response = requests.post('https://api.mercadolibre.com/oauth/token', data={
@@ -296,9 +299,10 @@ def create_app(config=None):
     @protected
     def oauth_start():
         if not oauth_ready():
-            return page_error('Configure os dados da aplicação Mercado Livre e o ID do vendedor no Render.', 503)
+            return page_error('Configure os dados da aplicação Mercado Livre no Render.', 503)
         state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
         g.db.execute(delete(OAuthState).where(OAuthState.session_id == g.browser.id))
+        g.db.execute(delete(PendingConnection).where(PendingConnection.session_id == g.browser.id))
         g.db.add(OAuthState(id=digest(state), session_id=g.browser.id,
                             verifier=cipher.encrypt(verifier.encode()).decode(), expires=int(time.time()) + 600))
         g.db.commit()
@@ -323,21 +327,66 @@ def create_app(config=None):
                                 'redirect_uri': base + '/oauth/callback', 'code_verifier': verifier})
         response = requests.get('https://api.mercadolibre.com/users/me', headers={'Authorization': 'Bearer ' + tokens['access_token']}, timeout=20)
         response.raise_for_status()
-        seller = str(response.json().get('id', ''))
-        if seller != app.config['MELI_SELLER_ID']:
+        identity = response.json()
+        seller = str(identity.get('id', ''))
+        if not seller.isdigit():
+            raise ValueError('seller')
+        connection = g.db.get(Connection, 1)
+        configured_seller = app.config['MELI_SELLER_ID']
+        pinned_seller = configured_seller or (connection.seller_id if connection else '')
+        if pinned_seller and seller != pinned_seller:
             return page_error('A conta autorizada não é o vendedor configurado. Conecte a conta correta.', 403)
-        connection = g.db.get(Connection, 1) or Connection(id=1)
+        if not configured_seller:
+            candidate = g.db.get(PendingConnection, g.browser.id) or PendingConnection(session_id=g.browser.id)
+            candidate.seller_id = seller
+            candidate.nickname = str(identity.get('nickname') or seller)[:120]
+            candidate.confirm_until = int(time.time()) + 600
+            store_tokens(candidate, tokens)
+            g.db.add(candidate)
+            g.db.commit()
+            return redirect(url_for('confirm_connection'))
+        connection = connection or Connection(id=1)
         connection.seller_id = seller
         store_tokens(connection, tokens)
         g.db.add(connection)
         g.db.commit()
         return redirect(url_for('dashboard', message='Conta Mercado Livre conectada.'))
 
+    @app.route('/oauth/confirm', methods=['GET', 'POST'])
+    @protected
+    def confirm_connection():
+        candidate = g.db.execute(select(PendingConnection).where(
+            PendingConnection.session_id == g.browser.id).with_for_update()).scalar_one_or_none()
+        now = int(time.time())
+        if not candidate or candidate.confirm_until <= now or candidate.expires <= now:
+            return page_error('Confirmação expirada ou já concluída. Inicie uma nova conexão.', 409)
+        if request.method == 'GET':
+            return render_template('confirm_connection.html', candidate=candidate)
+        connection = g.db.execute(select(Connection).where(Connection.id == 1).with_for_update()).scalar_one_or_none()
+        allowed_seller = app.config['MELI_SELLER_ID'] or (connection.seller_id if connection else '')
+        if allowed_seller and candidate.seller_id != allowed_seller:
+            return page_error('A conexão existente pertence a outro vendedor. Desconecte antes de trocar a conta.', 409)
+        connection = connection or Connection(id=1)
+        connection.seller_id, connection.access = candidate.seller_id, candidate.access
+        connection.refresh, connection.expires = candidate.refresh, candidate.expires
+        g.db.add(connection)
+        g.db.delete(candidate)
+        g.db.commit()
+        return redirect(url_for('dashboard', message='Conta vendedora confirmada e conectada.'))
+
+    @app.post('/oauth/cancel')
+    @protected
+    def cancel_connection():
+        g.db.execute(delete(PendingConnection).where(PendingConnection.session_id == g.browser.id))
+        g.db.commit()
+        return redirect(url_for('dashboard', message='Conexão pendente cancelada.'))
+
     @app.post('/oauth/disconnect')
     @protected
     def disconnect():
         g.db.execute(delete(Connection))
         g.db.execute(delete(OAuthState))
+        g.db.execute(delete(PendingConnection))
         g.db.commit()
         return redirect(url_for('dashboard', message='Credenciais removidas deste sistema. Revogue também o acesso no Mercado Livre, se necessário.'))
 
@@ -349,7 +398,7 @@ def create_app(config=None):
             abort(404)
         # PostgreSQL row lock serializes rotating refresh tokens across requests.
         connection = g.db.execute(select(Connection).where(Connection.id == 1).with_for_update()).scalar_one_or_none()
-        if not connection or not oauth_ready() or connection.seller_id != app.config['MELI_SELLER_ID']:
+        if not connection or not oauth_ready() or (app.config['MELI_SELLER_ID'] and connection.seller_id != app.config['MELI_SELLER_ID']):
             return page_error('Conecte o vendedor configurado antes de consultar.', 409)
         if connection.expires <= int(time.time()) + 60:
             tokens = token_request({'grant_type': 'refresh_token', 'refresh_token': cipher.decrypt(connection.refresh.encode()).decode()})

@@ -25,5 +25,3 @@ services:
         sync: false
       - key: MELI_CLIENT_SECRET
         sync: false
-      - key: MELI_SELLER_ID
-        sync: false

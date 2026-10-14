@@ -33,8 +33,8 @@ O serviço deve usar a branch que contém esta implementação. Antes de criar o
 2. Após publicar os arquivos, escolha **New → Web Service → Public Git Repository** e informe `https://github.com/correacvarte-maker/auditoria-fretes-evolux`. Branch `main`; runtime Python; build `pip install -r requirements.txt`; start `gunicorn --workers 1 --threads 4 --bind 0.0.0.0:$PORT --access-logfile /dev/null app:app`; health check `/health`. A configuração equivalente está em `render.yaml`, caso prefira Blueprint.
 3. Configure as variáveis abaixo. Use o nome real do serviço exibido no painel para preencher `PUBLIC_BASE_URL`. Se a URL ainda não foi atribuída, crie o serviço, copie a URL e ajuste a variável antes do deploy bem-sucedido. O app recusa configuração incompleta e não abre acesso público por padrão.
 4. Copie a URL pública que o Render efetivamente atribuiu, por exemplo o formato `https://<nome-real>.onrender.com`. **O formato é exemplo, não uma URL já criada.** Atualize `PUBLIC_BASE_URL` com a origem exata, sem caminho ou barra final, e reimplante. Se mudar para domínio personalizado, atualize também a redirect URI.
-5. Cadastre uma aplicação Mercado Livre (não Mercado Pago), habilite PKCE e configure a **redirect URI exata**: `<PUBLIC_BASE_URL>/oauth/callback`. Preencha os três campos MELI no Render. Não cole segredos em issue, README, chat ou navegador.
-6. Abra `/health`, depois o painel, faça login e clique em **Conectar conta**. Autorize com o vendedor correspondente a `MELI_SELLER_ID`. Cadastre SKU e MLB da conta; consulte o anúncio. Registre um frete com seu comprovante e confira os totais.
+5. Cadastre uma aplicação Mercado Livre (não Mercado Pago), habilite PKCE e configure a **redirect URI exata**: `<PUBLIC_BASE_URL>/oauth/callback`. Preencha `MELI_CLIENT_ID` e `MELI_CLIENT_SECRET` nos campos privados do Render. Não cole segredos em issue, README, chat ou barra de endereços do navegador.
+6. Abra `/health`, depois o painel, faça login e clique em **Conectar conta**. Autorize no Mercado Livre e confirme no painel o nome e o ID da conta que deseja auditar. A confirmação expira em 10 minutos e depende da mesma sessão administrativa; tokens pendentes ficam criptografados no banco. A conta confirmada fica fixada para consultas e reconexões. Para trocar de vendedor, primeiro desconecte e depois autorize e confirme a nova conta. Se `MELI_SELLER_ID` estiver definido, o sistema exige aquele ID e conecta diretamente após conferir a identidade. Cadastre SKU e MLB da conta; consulte o anúncio. Registre um frete com seu comprovante e confira os totais.
 
 | Variável | Valor / propósito |
 | --- | --- |
@@ -46,7 +46,7 @@ O serviço deve usar a branch que contém esta implementação. Antes de criar o
 | `TOKEN_ENCRYPTION_KEY` | Chave Fernet gerada localmente; preservar entre deploys |
 | `MELI_CLIENT_ID` | ID da aplicação Mercado Livre |
 | `MELI_CLIENT_SECRET` | Segredo da aplicação, somente no Render |
-| `MELI_SELLER_ID` | ID numérico da conta vendedora permitida |
+| `MELI_SELLER_ID` | Opcional: ID numérico pré-definido da conta permitida. Sem esta variável, o administrador confirma a conta identificada pelo OAuth antes da conexão |
 | `PYTHON_VERSION` | `3.12.15`, definido no Blueprint; confirme disponibilidade no runtime do Render |
 
 Os três campos MELI podem ficar vazios no primeiro deploy para obter a URL; conexão e consulta ficam desabilitadas. Não invente uma URL de callback e não use a URL do GitHub como redirect URI. Nenhuma credencial real é necessária para testes locais.
