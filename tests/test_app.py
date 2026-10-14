@@ -1,4 +1,5 @@
 import os
+import html
 import re
 import time
 from decimal import Decimal
@@ -125,7 +126,10 @@ class FakeResponse:
 
 def oauth_state(client):
     response = post(client, '/oauth/start', {})
-    args = parse_qs(urlparse(response.location).query)
+    assert response.status_code == 200
+    assert "form-action 'self'" in response.headers['Content-Security-Policy']
+    authorization_url = html.unescape(re.search(r'href="(https://auth\.mercadolivre\.com\.br/authorization\?[^"]+)"', response.get_data(as_text=True)).group(1))
+    args = parse_qs(urlparse(authorization_url).query)
     assert args['redirect_uri'] == ['http://localhost/oauth/callback']
     assert args['code_challenge_method'] == ['S256']
     return args['state'][0]
