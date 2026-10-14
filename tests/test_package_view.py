@@ -39,9 +39,9 @@ def test_measures_page_search_and_dashboard_section(app, client):
             dimensions='SELLER_PACKAGE_WIDTH: 20 cm\nSELLER_PACKAGE_WEIGHT: 1200 g',
             shipping_mode='me2', logistic_type='cross_docking', free_shipping=1,
             quote_note='none', reference_note='none', seen_run='x', synced_at=1))
-    page = client.get('/catalog/measures?q=EV-001').get_data(as_text=True)
+    page = client.get('/catalog/api-measures?q=EV-001').get_data(as_text=True)
     assert all(label in page for label in ('SKU no Mercado Livre', 'Largura', 'Altura', 'Profundidade', 'Peso bruto'))
     assert '20 cm' in page and '1,2 kg' in page and 'Não informado' in page
     assert '<script>bad</script>' not in page and 'UNRELATED' not in page
-    assert 'MLB123456789' not in client.get('/catalog/measures?q=UNRELATED').get_data(as_text=True)
-    assert 'Medidas no Mercado Livre' in client.get('/').get_data(as_text=True)
+    assert 'MLB123456789' not in client.get('/catalog/api-measures?q=UNRELATED').get_data(as_text=True)
+    assert 'Minhas medidas por SKU' in client.get('/').get_data(as_text=True)
