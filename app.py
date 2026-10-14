@@ -2,6 +2,8 @@ import base64
 import hashlib
 import hmac
 import json
+import csv
+import io
 import os
 import re
 import secrets
@@ -14,15 +16,15 @@ from urllib.parse import urlencode, urlparse
 
 import requests
 from cryptography.fernet import Fernet
-from flask import Flask, abort, g, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, g, redirect, render_template, request, url_for
 from sqlalchemy import create_engine, delete, select, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import check_password_hash
 
-from models import Base, BrowserSession, LoginGuard, OAuthState, Connection, PendingConnection, Product, AdTemplate, Listing, Freight, AccountItem, CatalogImport
+from models import Base, BrowserSession, LoginGuard, OAuthState, Connection, PendingConnection, Product, AdTemplate, Listing, Freight, AccountItem, CatalogImport, SkuQuote
 from catalog_import import run_import
-from package_view import package_rows
+from package_view import package_rows, sku_catalog, reference_signature
 
 
 def digest(value):
@@ -209,7 +211,7 @@ def create_app(config=None):
                                ).order_by(AccountItem.mlb).limit(20)).all())[:20],
                                message=request.args.get('message'), oauth_ready=oauth_ready())
 
-    @app.get('/catalog/measures')
+    @app.get('/catalog/api-measures')
     @protected
     def catalog_measures():
         connection = g.db.get(Connection, 1)
@@ -227,6 +229,90 @@ def create_app(config=None):
         return render_template('measures.html', rows=package_rows(records), total=total,
                                page=page, pages=max(1, (total + 99) // 100), search=search)
 
+    def connected_items():
+        connection = g.db.get(Connection, 1)
+        if not connection:
+            abort(409, 'Conecte a conta para consultar os SKUs.')
+        return g.db.scalars(select(AccountItem).where(AccountItem.seller_id == connection.seller_id).order_by(AccountItem.mlb)).all()
+
+    @app.get('/catalog/costs.csv')
+    @protected
+    def export_current_costs():
+        def safe_cell(value):
+            value = str(value or '')
+            return "'" + value if value.lstrip().startswith(('=', '+', '-', '@')) or value.startswith(('\t', '\r', '\n')) else value
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';', lineterminator='\r\n')
+        writer.writerow(['SKU no Mercado Livre', 'MLB', 'Título', 'Status', 'Preço do anúncio (BRL)',
+                         'Custo atual de frete (BRL)', 'Envio', 'Logística', 'Grátis ao comprador',
+                         'Consulta (Brasília)', 'Fonte / disponibilidade'])
+        for item in connected_items():
+            writer.writerow([safe_cell(', '.join(json.loads(item.skus_json))), item.mlb, safe_cell(item.title),
+                safe_cell(item.status), format(item.price, '.2f').replace('.', ',') if item.price is not None else '',
+                format(item.quote, '.2f').replace('.', ',') if item.quote is not None else '',
+                safe_cell(item.shipping_mode), safe_cell(item.logistic_type), 'Sim' if item.free_shipping else 'Não',
+                time.strftime('%d/%m/%Y %H:%M', time.gmtime(item.synced_at - 10800)), safe_cell(item.quote_note)])
+        return Response('\ufeff' + output.getvalue(), mimetype='text/csv',
+                        headers={'Content-Disposition': 'attachment; filename="custos-frete-atuais.csv"'})
+
+    @app.get('/catalog/measures')
+    @protected
+    def my_measures():
+        entries = sku_catalog(connected_items())
+        products = {p.sku: p for p in g.db.scalars(select(Product)).all()}
+        search = request.args.get('q', '').strip()[:80]
+        entries = [value for key, value in sorted(entries.items()) if not search or search.casefold() in key.casefold()
+                   or any(search.upper() in mlb for mlb in value['mlbs'])]
+        page = max(1, min(100000, int(request.args.get('page', '1'))))
+        rows = [{**entry, 'product': products.get(entry['sku'])} for entry in entries[(page - 1) * 50:page * 50]]
+        return render_template('my_measures.html', rows=rows, total=len(entries), page=page,
+                               pages=max(1, (len(entries) + 49) // 50), search=search,
+                               message=request.args.get('message'))
+
+    @app.post('/catalog/sku-measures')
+    @protected
+    def save_sku_measures():
+        sku = text_field('sku', 80)
+        entry = sku_catalog(connected_items()).get(sku)
+        if not entry:
+            return page_error('Este SKU não foi importado da conta conectada.', 400)
+        product = g.db.scalar(select(Product).where(Product.sku == sku)) or Product(sku=sku, name=entry['name'][:180])
+        for key in ('width', 'height', 'length'):
+            setattr(product, key, number(key, 10000))
+        product.weight = number('weight', 10000, 3)
+        g.db.add(product)
+        g.db.commit()
+        return redirect(url_for('my_measures', q=sku, message='Suas medidas foram salvas. Clique em Atualizar e comparar para recalcular os anúncios deste SKU.'))
+
+    @app.get('/catalog/comparison')
+    @protected
+    def current_comparison():
+        items = connected_items()
+        products = {p.sku: p for p in g.db.scalars(select(Product)).all()}
+        seller_id = g.db.get(Connection, 1).seller_id
+        calculations = {(q.mlb, q.sku): q for q in g.db.scalars(select(SkuQuote).where(SkuQuote.seller_id == seller_id)).all()}
+        search = request.args.get('q', '').strip()[:80]
+        rows = []
+        for item in items:
+            for sku in json.loads(item.skus_json) or ['']:
+                if search and search.casefold() not in sku.casefold() and search.upper() not in item.mlb:
+                    continue
+                product, calculation = products.get(sku), calculations.get((item.mlb, sku))
+                fresh = bool(product and calculation and calculation.measure_signature == reference_signature(product)
+                             and calculation.seen_run == item.seen_run)
+                expected = calculation.expected if fresh else None
+                note = (calculation.note if fresh else 'Atualize e compare para usar as medidas salvas') if product else 'Preencha suas medidas para este SKU'
+                difference = item.quote - expected if item.quote is not None and expected is not None else None
+                rows.append({'sku': sku, 'item': item, 'product': product, 'expected': expected,
+                             'difference': difference, 'note': note,
+                             'billable_weight': calculation.billable_weight if fresh else None})
+        complete = [row for row in rows if row['difference'] is not None]
+        page = max(1, min(100000, int(request.args.get('page', '1'))))
+        return render_template('comparison.html', rows=rows[(page - 1) * 100:page * 100], total=len(rows),
+                               compared=len(complete), higher=sum(row['difference'] > 0 for row in complete),
+                               pending=len(rows) - len(complete), page=page,
+                               pages=max(1, (len(rows) + 99) // 100), search=search)
+
     @app.get('/catalog')
     @protected
     def account_catalog():
@@ -237,10 +323,18 @@ def create_app(config=None):
         query = select(AccountItem).where(AccountItem.seller_id == connection.seller_id)
         total = g.db.scalar(select(func.count()).select_from(query.subquery()))
         records = g.db.scalars(query.order_by(AccountItem.mlb).offset((page - 1) * 100).limit(100)).all()
-        rows = [{'item': item, 'skus': ', '.join(json.loads(item.skus_json)),
-                 'custom': ', '.join(json.loads(item.custom_fields_json)),
-                 'difference': item.quote - item.expected_quote if item.quote is not None and item.expected_quote is not None else None}
-                for item in records]
+        products = {p.sku: p for p in g.db.scalars(select(Product)).all()}
+        calculations = {(q.mlb, q.sku): q for q in g.db.scalars(select(SkuQuote).where(SkuQuote.seller_id == connection.seller_id)).all()}
+        rows = []
+        for item in records:
+            skus = json.loads(item.skus_json)
+            product = products.get(skus[0]) if len(skus) == 1 else None
+            result = calculations.get((item.mlb, skus[0])) if len(skus) == 1 else None
+            fresh = bool(product and result and result.measure_signature == reference_signature(product) and result.seen_run == item.seen_run)
+            expected = result.expected if fresh else None
+            rows.append({'item': item, 'skus': ', '.join(skus), 'custom': ', '.join(json.loads(item.custom_fields_json)),
+                         'expected': expected, 'reference_note': result.note if fresh else 'Veja a comparação por SKU após informar suas medidas',
+                         'difference': item.quote - expected if item.quote is not None and expected is not None else None})
         return render_template('catalog.html', rows=rows, total=total, page=page,
                                pages=max(1, (total + 99) // 100), job=g.db.get(CatalogImport, 1))
 

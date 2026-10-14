@@ -132,3 +132,16 @@ class CatalogImport(Base):
     failures = Column(Integer, nullable=False, default=0)
     started_at = Column(Integer, nullable=False)
     updated_at = Column(Integer, nullable=False)
+
+
+class SkuQuote(Base):
+    __tablename__ = 'sku_reference_quotes'
+    mlb = Column(String(32), primary_key=True)
+    sku = Column(String(80), primary_key=True)
+    seller_id = Column(String(32), nullable=False)
+    expected = Column(Numeric(12, 2))
+    billable_weight = Column(Numeric(12, 3))
+    measure_signature = Column(String(64), nullable=False)
+    note = Column(String(180), nullable=False)
+    seen_run = Column(String(64), nullable=False)
+    calculated_at = Column(Integer, nullable=False)

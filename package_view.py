@@ -1,5 +1,6 @@
 """Display imported package measurements without guessing missing values."""
 import json
+import hashlib
 import re
 from decimal import Decimal, InvalidOperation
 
@@ -51,3 +52,18 @@ def package_rows(records):
                          'depth': display_measure(measures['length']),
                          'weight': display_measure(measures['weight'], True)})
     return rows
+
+
+def reference_signature(product):
+    values = [product.sku] + [format(Decimal(str(getattr(product, key))).normalize(), 'f')
+                             for key in ('width', 'height', 'length', 'weight')]
+    return hashlib.sha256('|'.join(values).encode()).hexdigest()
+
+
+def sku_catalog(records):
+    result = {}
+    for item in records:
+        for sku in json.loads(item.skus_json):
+            entry = result.setdefault(sku, {'sku': sku, 'name': item.title, 'mlbs': []})
+            entry['mlbs'].append(item.mlb)
+    return result
