@@ -60,6 +60,7 @@ def test_login_session_rotation_logout_and_headers(app, client):
     page = client.get('/')
     assert 'script-src' in page.headers['Content-Security-Policy']
     assert page.headers['Cache-Control'] == 'no-store'
+    assert page.headers['Referrer-Policy'] == 'strict-origin'
     assert 'HttpOnly' in response.headers['Set-Cookie']
     assert post(client, '/logout', {}).status_code == 302
     assert client.get('/').status_code == 302
@@ -70,6 +71,7 @@ def test_csrf_origin_host_and_lockout(client):
     assert client.post('/login', data={'csrf': 'á'}).status_code == 400
     token = csrf(client)
     assert client.post('/login', data={'csrf': token}, headers={'Origin': 'https://evil.example'}).status_code == 403
+    assert client.post('/login', data={'csrf': token}, headers={'Origin': 'null'}).status_code == 403
     assert client.get('/login', headers={'Host': 'evil.example'}).status_code == 400
     for _ in range(5):
         assert client.post('/login', data={'csrf': token, 'username': 'admin', 'password': 'wrong'}).status_code == 401
