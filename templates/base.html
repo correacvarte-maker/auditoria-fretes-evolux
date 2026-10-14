@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Auditoria de Fretes — Linha Evolux</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body><header><div><span class="brand">LINHA EVOLUX</span><h1>Auditoria de Fretes</h1></div>{% if g.browser is defined and g.browser.authenticated %}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ g.browser.csrf }}"><button class="secondary">Sair</button></form>{% endif %}</header><main>{% block content %}{% endblock %}</main><footer>Controle interno • Valores em reais • Embalagens em cm e kg</footer></body>
+</html>
