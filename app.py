@@ -98,7 +98,7 @@ def create_app(config=None):
     @app.after_request
     def secure_response(response):
         response.headers.update({'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
-                                 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
+                                 'Referrer-Policy': 'strict-origin', 'X-Frame-Options': 'DENY',
                                  'Content-Security-Policy': "default-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
         if production:
             response.headers['Strict-Transport-Security'] = 'max-age=31536000'
