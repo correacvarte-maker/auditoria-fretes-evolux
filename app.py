@@ -15,13 +15,14 @@ from urllib.parse import urlencode, urlparse
 import requests
 from cryptography.fernet import Fernet
 from flask import Flask, abort, g, redirect, render_template, request, url_for
-from sqlalchemy import create_engine, delete, select, func
+from sqlalchemy import create_engine, delete, select, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import check_password_hash
 
 from models import Base, BrowserSession, LoginGuard, OAuthState, Connection, PendingConnection, Product, AdTemplate, Listing, Freight, AccountItem, CatalogImport
 from catalog_import import run_import
+from package_view import package_rows
 
 
 def digest(value):
@@ -203,7 +204,28 @@ def create_app(config=None):
                                catalog_count=g.db.scalar(select(func.count()).select_from(AccountItem).where(
                                    AccountItem.seller_id == (g.db.get(Connection, 1).seller_id if g.db.get(Connection, 1) else ''))),
                                import_job=g.db.get(CatalogImport, 1),
+                               measure_rows=package_rows(g.db.scalars(select(AccountItem).where(
+                                   AccountItem.seller_id == (g.db.get(Connection, 1).seller_id if g.db.get(Connection, 1) else '')
+                               ).order_by(AccountItem.mlb).limit(20)).all())[:20],
                                message=request.args.get('message'), oauth_ready=oauth_ready())
+
+    @app.get('/catalog/measures')
+    @protected
+    def catalog_measures():
+        connection = g.db.get(Connection, 1)
+        if not connection:
+            return page_error('Conecte a conta para ver as medidas importadas.', 409)
+        page = max(1, min(100000, int(request.args.get('page', '1'))))
+        search = request.args.get('q', '').strip()[:80]
+        query = select(AccountItem).where(AccountItem.seller_id == connection.seller_id)
+        if search:
+            encoded = json.dumps(search)[1:-1]
+            query = query.where(or_(AccountItem.skus_json.contains(encoded, autoescape=True),
+                                    AccountItem.mlb.contains(search.upper(), autoescape=True)))
+        total = g.db.scalar(select(func.count()).select_from(query.subquery()))
+        records = g.db.scalars(query.order_by(AccountItem.mlb).offset((page - 1) * 100).limit(100)).all()
+        return render_template('measures.html', rows=package_rows(records), total=total,
+                               page=page, pages=max(1, (total + 99) // 100), search=search)
 
     @app.get('/catalog')
     @protected
