@@ -7,8 +7,7 @@ from decimal import Decimal, InvalidOperation
 import requests
 from sqlalchemy import select
 
-from models import AccountItem, CatalogImport, Connection, Listing, Product, SkuQuote
-from package_view import reference_signature
+from models import AccountItem, CatalogImport, Connection
 
 API = 'https://api.mercadolibre.com'
 
@@ -209,20 +208,8 @@ def run_import(factory, cipher, token_request, store_tokens, run_id, seller_id):
                     continue
                 progress(phase=f'Consultando frete de {mlb} ({processed + 1}/{len(ids)})')
                 skus, custom, dimensions = item_fields(item)
-                with factory() as db:
-                    listing = db.scalar(select(Listing).where(Listing.mlb == mlb))
-                    references = {p.sku: p for p in db.scalars(select(Product).where(Product.sku.in_(skus))).all()}
-                    reference = listing.product if listing else (references.get(skus[0]) if len(skus) == 1 else None)
-                    if reference:
-                        references.setdefault(reference.sku, reference)
-                    for product in references.values():
-                        db.expunge(product)
                 cost, weight, quote_note = quote(item)
-                calculated = {sku: quote(item, product) for sku, product in references.items()}
-                expected, _, reference_note = calculated[reference.sku] if reference else (
-                    None, None, 'Informe suas medidas por SKU para calcular o frete esperado')
-                if reference and expected is not None:
-                    reference_note = 'Cotação com embalagem interna do SKU ' + reference.sku
+                expected, reference_note = None, 'Referência calculada no painel pela tabela a partir de R$ 200'
                 with factory.begin() as db:
                     connection = db.get(Connection, 1)
                     job = db.get(CatalogImport, 1)
@@ -243,13 +230,6 @@ def run_import(factory, cipher, token_request, store_tokens, run_id, seller_id):
                     record.quote_note, record.reference_note = quote_note, reference_note[:180]
                     record.synced_at, record.seen_run = int(time.time()), run_id
                     db.add(record)
-                    for sku, (expected_sku, billable_sku, note_sku) in calculated.items():
-                        result = db.get(SkuQuote, (mlb, sku)) or SkuQuote(mlb=mlb, sku=sku)
-                        result.seller_id, result.expected, result.billable_weight = seller_id, expected_sku, billable_sku
-                        result.measure_signature = reference_signature(references[sku])
-                        result.note = ('Regras atuais do Mercado Livre com suas medidas' if expected_sku is not None else note_sku)[:180]
-                        result.calculated_at, result.seen_run = int(time.time()), run_id
-                        db.add(result)
                 processed += 1
                 quotes += int(cost is not None)
                 progress(processed=processed, quotes=quotes, failures=failures)

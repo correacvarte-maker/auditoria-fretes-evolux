@@ -80,3 +80,13 @@ Desconectar remove tokens locais; revogar autorização na conta Mercado Livre e
 - [Render: limites gratuitos e persistência](https://render.com/docs/free)
 
 **Pendente para ativar a integração:** concluir o cadastro da aplicação Mercado Livre, configurar suas credenciais e o vendedor no Render e validar autorização e consulta com a conta correta. O serviço web e o banco foram criados em 14/10/2026; o banco gratuito expira em 13/11/2026.
+# Importação em massa e tabela de referência (14/10/2026)
+
+Em **Minhas medidas por SKU → Importar planilha de medidas em massa**, envie `.xlsx` (uma aba) ou `.csv` de até 2 MB / 10.000 linhas, com cabeçalho `sku;largura;altura;comprimento;peso bruto`. Medidas em cm; peso bruto em kg; SKU como texto para preservar zeros. Valores positivos, até 2 casas nas medidas e 3 no peso. Use somente SKUs importados da conta conectada. A prévia valida o arquivo inteiro e lista os erros sem alterar os cadastros. A confirmação substitui as medidas existentes e salva o lote numa transação. Prévia vinculada à sessão e ao vendedor, expira em 10 minutos.
+
+O cálculo de referência escolhido pelo usuário é `peso_cubico = largura * altura * comprimento / 6000`, em kg; `peso_considerado = max(peso_cubico, peso_bruto)`. Sem arredondar antes da seleção da faixa, aplica-se a coluna **A partir de R$ 200** da [tabela oficial](https://www.mercadolivre.com.br/ajuda/40538), capturada em 14/10/2026, inclusive a anúncios de preço menor como referência fixa solicitada. Os limites superiores são inclusivos; acima de 150 kg usa-se a última linha. Os preços já incluem os descontos descritos na tabela. A coluna foi versionada em `freight_table.py` e não se atualiza sozinha: alterações publicadas pelo Mercado Livre precisam ser conferidas e incorporadas.
+
+O painel `/catalog/comparison` recalcula imediatamente depois de salvar/importar medidas e mostra peso bruto, cúbico, considerado, faixa, tarifa esperada, frete atual do anúncio e diferença (`atual - esperado`). A consulta ao Mercado Livre atualiza apenas o lado atual. Não consulta pedidos/vendas para essa comparação. Uma diferença indica revisão da referência; categorias/logísticas especiais podem ter outras regras. Um anúncio com vários SKUs gera uma linha por SKU, reutilizando o custo consultado do anúncio; não se inventa uma tarifa atual específica de variação.
+
+Esta regra de tabela substitui, no catálogo, a comparação anterior de cotação por API com medidas internas descrita abaixo. Os módulos legados de cadastro e fretes manuais continuam disponíveis.
+

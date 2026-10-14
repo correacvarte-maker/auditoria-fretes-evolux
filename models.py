@@ -4,6 +4,14 @@ from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
 
+class MeasureUpload(Base):
+    __tablename__ = 'measure_uploads'
+    session_id = Column(String(64), primary_key=True)
+    seller_id = Column(String(32), nullable=False)
+    rows_json = Column(Text, nullable=False)
+    expires = Column(Integer, nullable=False)
+
+
 class BrowserSession(Base):
     __tablename__ = 'browser_sessions'
     id = Column(String(64), primary_key=True)  # hash of opaque cookie
