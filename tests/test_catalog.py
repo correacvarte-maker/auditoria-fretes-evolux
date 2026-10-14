@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from test_app import app, client, login, post, catalog
 from models import AccountItem, CatalogImport, Connection, Product
-from catalog_import import item_fields, read_quote
+from catalog_import import item_fields, read_quote, package_dimensions, safe_api_error
 
 
 class Response:
@@ -129,3 +129,45 @@ def test_variation_skus_and_custom_fields_remain_separate():
     assert skus == ['A', 'B'] and custom == ['legacy', 'legacy-variation']
     assert read_quote({'coverage': {'all_country': {'currency_id': 'BRL', 'list_cost': None}}})[0] is None
     assert read_quote({'coverage': {'all_country': {'currency_id': 'BRL', 'list_cost': 0}}})[0] == 0
+
+
+def test_shipping_units_and_safe_error_metadata():
+    dimensions = package_dimensions({'attributes': [
+        {'id': 'SELLER_PACKAGE_HEIGHT', 'value_name': '1,4 m'},
+        {'id': 'SELLER_PACKAGE_WIDTH', 'value_name': '15 cm'},
+        {'id': 'SELLER_PACKAGE_LENGTH', 'value_name': '30 mm'},
+        {'id': 'SELLER_PACKAGE_WEIGHT', 'value_name': '2,05 kg'}]})
+    assert dimensions == '140.0x15x3.0,2050'
+    assert package_dimensions({'attributes': []}) is None
+    error = requests.HTTPError(response=Response({'code': 'PA_UNAUTHORIZED_RESULT_FROM_POLICIES',
+                                                  'message': 'secret must not be exposed'}, 403))
+    assert safe_api_error(error) == 'PA_UNAUTHORIZED_RESULT_FROM_POLICIES'
+    assert safe_api_error(requests.HTTPError(response=Response({'code': 'private-value'}, 403))) == 'sem código público de diagnóstico'
+
+
+def test_contextual_quote_after_item_quote_rejection(app, client, monkeypatch):
+    login(client)
+    connect(app)
+    scanned = False
+    item = {'id': 'MLB123456789', 'seller_id': 456, 'title': 'Item', 'price': 100,
+            'currency_id': 'BRL', 'listing_type_id': 'gold_special',
+            'shipping': {'mode': 'me2', 'logistic_type': 'cross_docking', 'free_shipping': True},
+            'attributes': [{'id': 'SELLER_PACKAGE_' + key, 'value_name': value}
+                for key, value in [('HEIGHT', '10 cm'), ('WIDTH', '20 cm'), ('LENGTH', '30 cm'), ('WEIGHT', '1200 g')]]}
+    def get(url, params=None, **kwargs):
+        nonlocal scanned
+        if url.endswith('/items/search'):
+            result = [] if scanned else [item['id']]
+            scanned = True
+            return Response({'results': result, 'scroll_id': 'scan', 'paging': {'total': 1}})
+        if url.endswith('/items'):
+            return Response([{'code': 200, 'body': item}])
+        if 'item_id' in params:
+            return Response({'code': 'bad_request'}, 400)
+        assert params['dimensions'] == '10x20x30,1200'
+        assert params['free_shipping'] == 'True' and params['item_price'] == 100
+        return Response({'coverage': {'all_country': {'currency_id': 'BRL', 'list_cost': 19.99}}})
+    monkeypatch.setattr('catalog_import.requests.get', get)
+    post(client, '/catalog/import', {})
+    with app.extensions['db_factory']() as db:
+        assert db.get(AccountItem, item['id']).quote == Decimal('19.99')
