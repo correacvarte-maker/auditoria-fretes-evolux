@@ -1,0 +1,3 @@
+{% extends 'base.html' %}{% block content %}
+<section class="login"><h2>Confirme a conta vendedora</h2><p>Confira se esta é a conta que você quer auditar.</p><p><strong>{{ candidate.nickname }}</strong><br>ID do vendedor: {{ candidate.seller_id }}</p><p>A confirmação fica disponível por 10 minutos. As consultas serão limitadas aos anúncios deste vendedor.</p><form method="post"><input type="hidden" name="csrf" value="{{ g.browser.csrf }}"><button>Confirmar conta vendedora</button></form><form method="post" action="/oauth/cancel"><input type="hidden" name="csrf" value="{{ g.browser.csrf }}"><p><button class="secondary">Cancelar conexão</button></p></form></section>
+{% endblock %}
