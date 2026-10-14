@@ -94,3 +94,41 @@ class Freight(Base):
     @property
     def difference(self):
         return self.charged - self.expected
+
+
+class AccountItem(Base):
+    __tablename__ = 'account_items'
+    mlb = Column(String(32), primary_key=True)
+    seller_id = Column(String(32), nullable=False, index=True)
+    title = Column(String(180), nullable=False)
+    status = Column(String(40), nullable=False)
+    listing_type = Column(String(40), nullable=False)
+    skus_json = Column(Text, nullable=False, default='[]')
+    custom_fields_json = Column(Text, nullable=False, default='[]')
+    dimensions = Column(Text, nullable=False)
+    shipping_mode = Column(String(40), nullable=False)
+    logistic_type = Column(String(40), nullable=False)
+    free_shipping = Column(Integer, nullable=False)
+    price = Column(Numeric(12, 2))
+    quote = Column(Numeric(12, 2))
+    expected_quote = Column(Numeric(12, 2))
+    quote_note = Column(String(180), nullable=False)
+    reference_note = Column(String(180), nullable=False)
+    billable_weight = Column(Numeric(12, 3))
+    seen_run = Column(String(64), nullable=False)
+    synced_at = Column(Integer, nullable=False)
+
+
+class CatalogImport(Base):
+    __tablename__ = 'catalog_imports'
+    id = Column(Integer, primary_key=True)
+    seller_id = Column(String(32), nullable=False)
+    run_id = Column(String(64), nullable=False)
+    status = Column(String(30), nullable=False)
+    phase = Column(String(180), nullable=False)
+    total = Column(Integer, nullable=False, default=0)
+    processed = Column(Integer, nullable=False, default=0)
+    quotes = Column(Integer, nullable=False, default=0)
+    failures = Column(Integer, nullable=False, default=0)
+    started_at = Column(Integer, nullable=False)
+    updated_at = Column(Integer, nullable=False)

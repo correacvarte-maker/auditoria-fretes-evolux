@@ -14,8 +14,11 @@ Ambiente de demonstração no Render: [Auditoria de Fretes](https://auditoria-fr
 - Registro de frete esperado e cobrado por referência única de pedido/envio, data e origem da evidência. Diferença em centavos = cobrado − esperado; painel com total cobrado, excesso e divergências. Valores negativos indicam abaixo do esperado.
 - OAuth Authorization Code com PKCE S256 e state aleatório, ligado à sessão, válido por 10 minutos e de uso único. Verificação do vendedor em `/users/me`. Tokens e verifier criptografados com Fernet no banco, nunca enviados ao navegador.
 - Renovação de token sob bloqueio de linha PostgreSQL; credenciais rotacionadas salvas antes de consultar o anúncio. Consulta autenticada de `/items/{MLB}` com checagem de propriedade. Desconexão local remove credenciais.
+- Importação de todos os anúncios da conta por scan/scroll, inclusive contas com mais de 1.000 anúncios; consulta de detalhes em lotes e cotação atual de envio por MLB. Progresso em segundo plano, cancelamento e resultados paginados. A importação não altera anúncios nem sobrescreve medidas internas.
+- SKU da API (`SELLER_SKU`) separado de MLB e de `seller_custom_field`; SKUs de variações preservados. Campos ausentes ficam explicitamente pendentes. A cotação é obtida por `/users/{id}/shipping_options/free`, em BRL; um zero real é preservado, ausência não vira zero.
+- Comparação estimada entre a cotação atual do anúncio e a cotação atual com a embalagem interna de referência do SKU. Sem embalagem interna, não se inventa um frete esperado. Nenhuma estimativa é registrada como débito de venda.
 
-Não há tarifa oficial estimada, reconciliação automática de extratos/pedidos/envios, importação em lote, publicação de anúncios, múltiplos usuários ou cálculo automático de divergência dimensional neste MVP. O frete esperado deve vir de uma referência documentada; uma diferença não comprova cobrança indevida. As consultas de API são explícitas por MLB. Quando a API não retornar dimensões, o painel informa a ausência. SKU é definido pelo operador; não é inferido de variações do anúncio.
+Não há reconciliação automática de extratos/pedidos/envios, publicação de anúncios ou múltiplos usuários neste MVP. Uma diferença estimada não comprova cobrança indevida: tarifas e descontos variam ao longo do tempo. Débitos de vendas continuam exigindo comprovante no histórico de fretes. Quando a API não retornar dimensões ou cotações, o painel informa a ausência. O cadastro de embalagem interna continua sendo responsabilidade do operador.
 
 ## Preparação local
 
@@ -55,7 +58,9 @@ Os três campos MELI podem ficar vazios no primeiro deploy para obter a URL; con
 
 Render Free é adequado para demonstração: o web service pode dormir após 15 minutos de inatividade e o PostgreSQL gratuito expira após 30 dias. Arquivos locais são efêmeros; por isso este app exige PostgreSQL em produção. Para operação contínua, escolha armazenamento que não expire e um serviço adequado, confirme custos no painel e mantenha backups. O Blueprint cria somente o serviço web grátis, não contrata banco pago.
 
-O app cria tabelas no primeiro início. Execute uma única instância para este MVP; futuras alterações de esquema precisam de migrações revisadas. A consulta de API usa timeout de 20 segundos e não possui tarefas em segundo plano. Falhas de refresh exigem reconectar. O bloqueio global de login protege o único administrador, mas um atacante pode causar bloqueios temporários; para operação com vários usuários, substitua por identidade gerenciada e controle de acesso.
+O app cria tabelas no primeiro início. Execute uma única instância e um worker Gunicorn para este MVP; futuras alterações de esquema precisam de migrações revisadas. A consulta de API usa timeout de 20 segundos. A importação usa uma tarefa em segundo plano no processo web, com progresso persistido no PostgreSQL, retries limitados para HTTP 429 e rotação de refresh sob bloqueio. Se o processo reiniciar ou ficar sem progresso por cinco minutos, inicie novamente; os resultados anteriores permanecem identificados por data e execução, sem exclusão automática de anúncios ausentes. Uma importação completa atualiza observações, não constitui um histórico financeiro. Falhas de refresh exigem reconectar. O bloqueio global de login protege o único administrador, mas um atacante pode causar bloqueios temporários; para operação com vários usuários, substitua por identidade gerenciada e controle de acesso.
+
+Depois de conectar a conta, clique em **Importar todos os anúncios e consultar fretes**. A página de progresso acompanha o trabalho; **Ver todos os anúncios e fretes atuais** mostra até 100 resultados por página. Para calcular a referência esperada, cadastre medidas reais no produto com o mesmo SKU único retornado pela API, ou vincule o MLB ao produto interno; depois atualize a importação. Anúncios com vários SKUs não são associados automaticamente a um único produto.
 
 Sem chave Fernet, tokens salvos não podem ser recuperados. Ao trocar a chave, primeiro desconecte a conta e depois reconecte; uma rotação geral precisa de migração de credenciais. Ao trocar a senha/hash, invalide também as sessões existentes no banco. Restrinja acesso ao painel Render e ao banco, mantenha backups protegidos e nunca habilite debug em produção. O comando de start desativa logs de acesso para não registrar query strings com códigos OAuth; mantenha essa opção ou configure redação desses parâmetros em qualquer proxy/monitoramento próprio. O provedor de hospedagem também pode registrar tráfego: revise retenção e acesso.
 
@@ -66,6 +71,8 @@ Desconectar remove tokens locais; revogar autorização na conta Mercado Livre e
 - [Mercado Livre: autenticação e autorização](https://developers.mercadolivre.com.br/autenticacao-e-autorizacao)
 - [Mercado Livre: itens e buscas](https://developers.mercadolivre.com.br/pt_br/itens-e-buscas)
 - [Mercado Livre: atributos](https://developers.mercadolivre.com.br/pt_br/api-docs-pt-br/atributos)
+- [Mercado Livre: custos de envio e cotações](https://developers.mercadolivre.com.br/pt_br/produto-consulta-de-usuarios/custos-de-envio)
+- [Mercado Livre: variações e SELLER_SKU](https://developers.mercadolivre.com.br/pt_br/variacoes)
 - [Render: web services](https://render.com/docs/web-services)
 - [Render: limites gratuitos e persistência](https://render.com/docs/free)
 

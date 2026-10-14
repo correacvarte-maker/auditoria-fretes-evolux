@@ -1,10 +1,12 @@
 import base64
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
 import time
+from threading import Thread
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from functools import wraps
@@ -13,12 +15,13 @@ from urllib.parse import urlencode, urlparse
 import requests
 from cryptography.fernet import Fernet
 from flask import Flask, abort, g, redirect, render_template, request, url_for
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, delete, select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import check_password_hash
 
-from models import Base, BrowserSession, LoginGuard, OAuthState, Connection, PendingConnection, Product, AdTemplate, Listing, Freight
+from models import Base, BrowserSession, LoginGuard, OAuthState, Connection, PendingConnection, Product, AdTemplate, Listing, Freight, AccountItem, CatalogImport
+from catalog_import import run_import
 
 
 def digest(value):
@@ -197,7 +200,70 @@ def create_app(config=None):
                                charged=sum((f.charged for f in freights), Decimal(0)),
                                overcharge=sum((max(f.difference, Decimal(0)) for f in freights), Decimal(0)),
                                divergences=sum(f.difference != 0 for f in freights),
+                               catalog_count=g.db.scalar(select(func.count()).select_from(AccountItem).where(
+                                   AccountItem.seller_id == (g.db.get(Connection, 1).seller_id if g.db.get(Connection, 1) else ''))),
+                               import_job=g.db.get(CatalogImport, 1),
                                message=request.args.get('message'), oauth_ready=oauth_ready())
+
+    @app.get('/catalog')
+    @protected
+    def account_catalog():
+        connection = g.db.get(Connection, 1)
+        if not connection:
+            return page_error('Conecte a conta antes de consultar os anúncios.', 409)
+        page = max(1, min(100000, int(request.args.get('page', '1'))))
+        query = select(AccountItem).where(AccountItem.seller_id == connection.seller_id)
+        total = g.db.scalar(select(func.count()).select_from(query.subquery()))
+        records = g.db.scalars(query.order_by(AccountItem.mlb).offset((page - 1) * 100).limit(100)).all()
+        rows = [{'item': item, 'skus': ', '.join(json.loads(item.skus_json)),
+                 'custom': ', '.join(json.loads(item.custom_fields_json)),
+                 'difference': item.quote - item.expected_quote if item.quote is not None and item.expected_quote is not None else None}
+                for item in records]
+        return render_template('catalog.html', rows=rows, total=total, page=page,
+                               pages=max(1, (total + 99) // 100), job=g.db.get(CatalogImport, 1))
+
+    @app.post('/catalog/import')
+    @protected
+    def import_catalog():
+        connection = g.db.execute(select(Connection).where(Connection.id == 1).with_for_update()).scalar_one_or_none()
+        if not connection or not oauth_ready():
+            return page_error('Conecte a conta antes de importar.', 409)
+        job = g.db.execute(select(CatalogImport).where(CatalogImport.id == 1).with_for_update()).scalar_one_or_none()
+        now = int(time.time())
+        if job and job.status == 'running' and job.updated_at > now - 300:
+            return redirect('/catalog/import')
+        job = job or CatalogImport(id=1)
+        run_id = secrets.token_urlsafe(32)
+        seller_id = connection.seller_id
+        job.seller_id, job.run_id, job.status = seller_id, run_id, 'running'
+        job.phase, job.total, job.processed, job.quotes, job.failures = 'Iniciando importação de todos os anúncios', 0, 0, 0, 0
+        job.started_at = job.updated_at = now
+        g.db.add(job)
+        g.db.commit()
+        args = (factory, cipher, token_request, store_tokens, run_id, seller_id)
+        if app.config.get('CATALOG_IMPORT_INLINE'):
+            run_import(*args)
+        else:
+            Thread(target=run_import, args=args, daemon=True, name='seller-catalog-import').start()
+        return redirect('/catalog/import')
+
+    @app.get('/catalog/import')
+    @protected
+    def import_progress():
+        job, connection = g.db.get(CatalogImport, 1), g.db.get(Connection, 1)
+        if not job or not connection or job.seller_id != connection.seller_id:
+            return redirect('/')
+        stale = job.status == 'running' and job.updated_at <= int(time.time()) - 300
+        return render_template('import_progress.html', job=job, stale=stale)
+
+    @app.post('/catalog/import/cancel')
+    @protected
+    def cancel_import():
+        job = g.db.execute(select(CatalogImport).where(CatalogImport.id == 1).with_for_update()).scalar_one_or_none()
+        if job and job.status == 'running':
+            job.status, job.phase, job.updated_at = 'interrupted', 'Importação interrompida. Dados já consultados preservados.', int(time.time())
+        g.db.commit()
+        return redirect('/catalog')
 
     def text_field(name, maximum):
         value = request.form.get(name, '').strip()
@@ -426,6 +492,10 @@ def create_app(config=None):
     @app.template_filter('brl')
     def brl(value):
         return f'R$ {value:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
+
+    @app.template_filter('consulted_at')
+    def consulted_at(value):
+        return time.strftime('%d/%m/%Y %H:%M (Brasília)', time.gmtime(value - 10800))
 
     return app
 
