@@ -2,6 +2,8 @@
 
 MVP web privado para cadastro de produtos, anúncios, modelos e auditoria de custos de frete. Python 3.12, Flask, PostgreSQL e HTML responsivo. O repositório era composto apenas por este README antes da implementação.
 
+Ambiente de demonstração no Render: [Auditoria de Fretes](https://auditoria-fretes-evolux.onrender.com). Callback OAuth real: `https://auditoria-fretes-evolux.onrender.com/oauth/callback`. Login e configuração ficam privados; nenhuma credencial deve ser publicada neste repositório.
+
 ## O que está disponível
 
 - Login de um administrador por senha com hash scrypt; sessões opacas no banco, expiração de 1 hora, rotação no login e logout. Cinco falhas bloqueiam o login por 15 minutos.
@@ -67,4 +69,4 @@ Desconectar remove tokens locais; revogar autorização na conta Mercado Livre e
 - [Render: web services](https://render.com/docs/web-services)
 - [Render: limites gratuitos e persistência](https://render.com/docs/free)
 
-**Pendente para ativação:** criar o serviço, obter sua URL real, configurar banco/segredos e validar autorização e consulta com a conta correta. Não há URL de deploy verificada neste momento.
+**Pendente para ativar a integração:** concluir o cadastro da aplicação Mercado Livre, configurar suas credenciais e o vendedor no Render e validar autorização e consulta com a conta correta. O serviço web e o banco foram criados em 14/10/2026; o banco gratuito expira em 13/11/2026.
