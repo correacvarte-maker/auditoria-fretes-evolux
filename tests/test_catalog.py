@@ -65,15 +65,15 @@ def test_import_pages_quotes_zero_currency_and_preserves_reference(app, client, 
         job = db.get(CatalogImport, 1)
         assert (job.status, job.total, job.processed, job.quotes) == ('complete', 3, 3, 2)
         record = db.get(AccountItem, 'MLB123456789')
-        assert record.quote == Decimal('15') and record.expected_quote == Decimal('10')
+        assert record.quote == Decimal('15') and record.expected_quote is None
         assert db.get(Product, 1).weight == Decimal('1.2')
         assert db.get(AccountItem, 'MLB222222222').quote == 0
         assert json.loads(db.get(AccountItem, 'MLB222222222').skus_json) == []
         assert db.get(AccountItem, 'MLB333333333').quote is None
     assert pages[1]['scroll_id'] == 'cursor' and 'offset' not in pages[1]
-    assert any(x.get('dimensions') == '30.00x20.00x10.00,1200' for x in quote_calls)
+    assert not any('dimensions' in x for x in quote_calls)
     page = client.get('/catalog').get_data(as_text=True)
-    assert 'R$ 5,00' in page and 'NOT-A-SKU' in page and 'SKU não informado' in page
+    assert 'R$ 25,45' in page and 'NOT-A-SKU' in page and 'SKU não informado' in page
     assert 'R$ 0,00' in page and 'não comprova' in page
     assert post(client, '/catalog/import', {}).status_code == 302
     with app.extensions['db_factory']() as db:

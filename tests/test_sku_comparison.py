@@ -36,7 +36,7 @@ def test_user_measures_required_validated_and_never_filled_from_api(app, client)
         p = db.scalar(select(Product).where(Product.sku == 'A'))
         assert (p.width, p.height, p.length, p.weight) == (Decimal(20), Decimal(10), Decimal(30), Decimal('1.2'))
         assert db.scalar(select(Product).where(Product.sku == 'B')) is None
-    assert 'Atualize e compare' in client.get('/catalog/comparison?q=A').get_data(as_text=True)
+    assert 'R$ 25,45' in client.get('/catalog/comparison?q=A').get_data(as_text=True)
 
 
 def test_per_sku_quotes_for_variations_and_invalidate_on_edit(app, client, monkeypatch):
@@ -64,19 +64,19 @@ def test_per_sku_quotes_for_variations_and_invalidate_on_edit(app, client, monke
     monkeypatch.setattr('catalog_import.requests.get', get)
     assert post(client, '/catalog/import', {}).status_code == 302
     with app.extensions['db_factory']() as db:
-        assert db.get(SkuQuote, ('MLB123456789', 'A')).expected == 10
-        assert db.get(SkuQuote, ('MLB123456789', 'B')).expected == 15
+        assert db.get(SkuQuote, ('MLB123456789', 'A')) is None
+        assert db.get(SkuQuote, ('MLB123456789', 'B')) is None
         assert db.scalar(select(Product).where(Product.sku == 'B')).weight == Decimal('2.500')
-    assert {c.get('dimensions') for c in calls if 'dimensions' in c} == {'10.00x20.00x30.00,1200', '10.00x40.00x30.00,2500'}
+    assert not any('dimensions' in c for c in calls)
     assert all(c['item_price'] == 100 and c['logistic_type'] == 'cross_docking' for c in calls)
     page_a = client.get('/catalog/comparison?q=A').get_data(as_text=True)
-    assert 'R$ 30,00' in page_a and 'R$ 10,00' in page_a and 'R$ 20,00' in page_a
+    assert 'R$ 30,00' in page_a and 'R$ 25,45' in page_a and 'R$ 4,55' in page_a
     page_b = client.get('/catalog/comparison?q=B').get_data(as_text=True)
-    assert 'R$ 15,00' in page_b
-    save(client, 'A', width='21')
+    assert 'R$ 27,05' in page_b
+    save(client, 'A', width='41')
     page_a = client.get('/catalog/comparison?q=A').get_data(as_text=True)
-    assert 'Atualize e compare' in page_a and 'R$ 10,00' not in page_a
-    assert 'R$ 15,00' in client.get('/catalog/comparison?q=B').get_data(as_text=True)
+    assert 'R$ 27,05' in page_a and 'R$ 25,45' not in page_a
+    assert 'R$ 27,05' in client.get('/catalog/comparison?q=B').get_data(as_text=True)
 
 
 def test_current_cost_export_requires_login_and_preserves_zero(app, client):
