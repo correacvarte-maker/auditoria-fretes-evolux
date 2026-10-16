@@ -298,7 +298,13 @@ def create_app(config=None):
     @app.get('/catalog/measures/model.csv')
     @protected
     def measures_model():
-        return Response('\ufeffsku;largura;altura;comprimento;peso bruto\r\n', mimetype='text/csv',
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';', lineterminator='\r\n')
+        writer.writerow(['sku', 'largura', 'altura', 'comprimento', 'peso bruto'])
+        for sku in sorted(sku_catalog(connected_items())):
+            safe_sku = "'" + sku if sku.lstrip().startswith(('=', '+', '-', '@')) or sku.startswith(('\t', '\r', '\n')) else sku
+            writer.writerow([safe_sku, '', '', '', ''])
+        return Response('\ufeff' + output.getvalue(), mimetype='text/csv',
                         headers={'Content-Disposition': 'attachment; filename="modelo-medidas-sku.csv"'})
 
     @app.route('/catalog/measures/import', methods=['GET', 'POST'])

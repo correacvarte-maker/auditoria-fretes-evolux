@@ -79,6 +79,8 @@ def validate(rows, allowed_skus):
             continue
         raw_sku = row[0]
         sku = str(raw_sku or '').strip()
+        if sku not in allowed_skus and sku.startswith("'") and sku[1:] in allowed_skus:
+            sku = sku[1:]
         if not isinstance(raw_sku, str):
             errors.append(f'Linha {line}: formate o SKU como texto para preservar zeros à esquerda.')
             continue
