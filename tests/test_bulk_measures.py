@@ -17,6 +17,23 @@ def csv_file(rows):
     return io.BytesIO(('sku;largura;altura;comprimento;peso bruto\n' + rows).encode('utf-8-sig'))
 
 
+def test_model_contains_unique_connected_skus_and_blank_measurements(app, client):
+    import csv
+    import json
+    from models import AccountItem
+    assert client.get('/catalog/measures/model.csv').status_code == 302
+    login(client)
+    seed(app)
+    with app.extensions['db_factory'].begin() as db:
+        db.get(AccountItem, 'MLB123456789').skus_json = json.dumps(['B', '001', 'A', 'A', '=SKU'])
+    response = client.get('/catalog/measures/model.csv')
+    rows = list(csv.reader(io.StringIO(response.get_data(as_text=True).lstrip('\ufeff')), delimiter=';'))
+    assert rows == [['sku','largura','altura','comprimento','peso bruto'],
+                    ['001','','','',''], ["'=SKU",'','','',''], ['A','','','',''], ['B','','','','']]
+    assert 'attachment' in response.headers['Content-Disposition']
+    assert parse(FileStorage(stream=csv_file("'=SKU;10;20;30;1\n"), filename='x.csv'), {'=SKU'})[0]['sku'] == '=SKU'
+
+
 def upload(client, rows):
     return client.post('/catalog/measures/import', data={'csrf': csrf(client, '/'),
         'file': (csv_file(rows), 'medidas.csv')})
