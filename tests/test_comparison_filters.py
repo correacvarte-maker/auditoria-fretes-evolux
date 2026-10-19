@@ -42,3 +42,16 @@ def test_filter_applied_before_pagination_and_kept_in_links(app, client):
     assert 'result=more' in page1 and 'q=SKU-' in page1 and 'Página 1 de 2' in page1
     page2=client.get('/catalog/comparison?result=more&q=SKU-&page=2').get_data(as_text=True)
     assert '>SKU-100<small>' in page2 and '>SKU-000<small>' not in page2
+
+
+def test_old_run_cost_is_pending_instead_of_classified_as_current(app, client):
+    from models import CatalogImport
+    login(client)
+    seed(app)
+    with app.extensions['db_factory'].begin() as db:
+        db.add(Product(sku='A',name='A',width=120,height=10,length=10,weight=1))
+        db.add(CatalogImport(id=1,seller_id='456',run_id='new',status='complete',phase='Concluído',
+                             total=1,processed=1,quotes=0,failures=0,started_at=1,updated_at=2))
+    assert '>A<small>' not in client.get('/catalog/comparison?result=more').get_data(as_text=True)
+    page=client.get('/catalog/comparison?result=pending').get_data(as_text=True)
+    assert '>A<small>' in page and 'custo anterior não usado' in page and 'R$ 30,00' not in page
