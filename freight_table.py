@@ -1,4 +1,4 @@
-"""User-selected reference: >= R$200 column, captured 2026-10-14.
+"""User-selected reference: >= R$200 column, verified unchanged 2026-10-19.
 
 Source: https://www.mercadolivre.com.br/ajuda/40538
 New products / Full, Coleta and agencies / green or no reputation, MercadoLider.
@@ -8,7 +8,7 @@ The user explicitly selected this column regardless of the advertisement price.
 from decimal import Decimal
 
 SOURCE_URL = 'https://www.mercadolivre.com.br/ajuda/40538'
-CHECKED_ON = '14/10/2026'
+CHECKED_ON = '19/10/2026'
 RAW_BANDS = (
     ('0.3', '21.65'), ('0.5', '23.25'), ('1', '24.45'), ('1.5', '25.45'),
     ('2', '25.55'), ('3', '27.05'), ('4', '29.25'), ('5', '32.45'),

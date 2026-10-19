@@ -374,6 +374,7 @@ def create_app(config=None):
     @protected
     def current_comparison():
         items = connected_items()
+        current_job = g.db.get(CatalogImport, 1)
         products = {p.sku: p for p in g.db.scalars(select(Product)).all()}
         search = request.args.get('q', '').strip()[:80]
         rows = []
@@ -385,9 +386,13 @@ def create_app(config=None):
                 calculation = table_calculation(product) if product else {}
                 expected = calculation.get('expected')
                 note = calculation.get('band', 'Preencha suas medidas para este SKU')
-                difference = item.quote - expected if item.quote is not None and expected is not None else None
+                fresh_quote = not current_job or item.seen_run == current_job.run_id
+                current_quote = item.quote if fresh_quote else None
+                difference = current_quote - expected if current_quote is not None and expected is not None else None
                 rows.append({'sku': sku, 'item': item, 'product': product, 'expected': expected,
                              'difference': difference, 'note': note,
+                             'current_quote': current_quote,
+                             'current_quote_note': item.quote_note if fresh_quote else 'Sem consulta nesta atualização; custo anterior não usado',
                              **calculation})
         complete = [row for row in rows if row['difference'] is not None]
         counts = {'more': 0, 'less': 0, 'correct': 0, 'pending': 0}
