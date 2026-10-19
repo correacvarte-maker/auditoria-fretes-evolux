@@ -390,11 +390,24 @@ def create_app(config=None):
                              'difference': difference, 'note': note,
                              **calculation})
         complete = [row for row in rows if row['difference'] is not None]
+        counts = {'more': 0, 'less': 0, 'correct': 0, 'pending': 0}
+        labels = {'more': 'Pagando mais', 'less': 'Pagando menos', 'correct': 'Correto', 'pending': 'Pendente'}
+        for row in rows:
+            difference = row['difference']
+            result = ('pending' if difference is None else 'more' if difference > 0 else 'less' if difference < 0 else 'correct')
+            row['result'], row['result_label'] = result, labels[result]
+            counts[result] += 1
+        result_filter = request.args.get('result', 'all')
+        if result_filter not in ('all', *counts):
+            return page_error('Filtro de comparação inválido.')
+        filtered = [row for row in rows if result_filter == 'all' or row['result'] == result_filter]
+        filtered.sort(key=lambda row: (row['difference'] is None, -(row['difference'] or Decimal(0)), row['sku'], row['item'].mlb))
         page = max(1, min(100000, int(request.args.get('page', '1'))))
-        return render_template('comparison.html', rows=rows[(page - 1) * 100:page * 100], total=len(rows),
+        return render_template('comparison.html', rows=filtered[(page - 1) * 100:page * 100], total=len(rows),
                                compared=len(complete), higher=sum(row['difference'] > 0 for row in complete),
                                pending=len(rows) - len(complete), page=page,
-                               pages=max(1, (len(rows) + 99) // 100), search=search, table_url=TABLE_URL, table_date=TABLE_DATE)
+                               pages=max(1, (len(filtered) + 99) // 100), search=search, table_url=TABLE_URL, table_date=TABLE_DATE,
+                               counts=counts, result_filter=result_filter, filtered_total=len(filtered))
 
     @app.get('/catalog')
     @protected
