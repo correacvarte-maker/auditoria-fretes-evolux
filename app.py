@@ -81,7 +81,9 @@ def create_app(config=None):
         g.cookie = None
         if request.path != '/catalog/measures/import' and request.content_length and request.content_length > 64 * 1024:
             abort(413)
-        if request.path == '/health':
+        # Assets/404s can finish after login rotates the cookie. They must never
+        # replace the authenticated cookie with a new anonymous session.
+        if request.path == '/health' or request.endpoint in (None, 'static'):
             return
         now = int(time.time())
         raw = request.cookies.get('evolux_session', '')
@@ -161,6 +163,8 @@ def create_app(config=None):
 
     @app.route('/login', methods=['GET', 'POST'])
     def login():
+        if request.method == 'GET' and g.browser.authenticated:
+            return redirect(url_for('dashboard'))
         error = None
         status = 200
         if request.method == 'POST':
