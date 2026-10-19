@@ -6,7 +6,7 @@ import requests
 from sqlalchemy import select
 
 from test_app import app, client, login, post, catalog
-from models import AccountItem, CatalogImport, Connection, Product
+from models import AccountItem, CatalogImport, Connection, Product, ItemPublication
 from catalog_import import item_fields, read_quote, package_dimensions, safe_api_error
 
 
@@ -35,12 +35,12 @@ def test_import_pages_quotes_zero_currency_and_preserves_reference(app, client, 
     pages, quote_calls = [], []
     items = {
         'MLB123456789': {'id': 'MLB123456789', 'seller_id': 456, 'title': 'Remote title', 'status': 'active',
-            'currency_id': 'BRL', 'price': 100, 'listing_type_id': 'gold_pro', 'condition': 'new',
+            'currency_id': 'BRL', 'price': 100, 'listing_type_id': 'gold_pro', 'condition': 'new', 'catalog_listing': True,
             'shipping': {'mode': 'me2', 'logistic_type': 'drop_off', 'free_shipping': True},
             'attributes': [{'id': 'SELLER_SKU', 'value_name': 'EV-001'},
                            {'id': 'SELLER_PACKAGE_WEIGHT', 'value_name': '3000 g'}]},
         'MLB222222222': {'id': 'MLB222222222', 'seller_id': 456, 'title': 'Zero quote', 'status': 'paused',
-            'shipping': {'mode': 'me2'}, 'attributes': [], 'seller_custom_field': 'NOT-A-SKU'},
+            'shipping': {'mode': 'me2'}, 'attributes': [], 'seller_custom_field': 'NOT-A-SKU', 'catalog_listing': False, 'catalog_product_id': 'MLB123'},
         'MLB333333333': {'id': 'MLB333333333', 'seller_id': 456, 'title': 'Foreign currency', 'status': 'closed',
             'shipping': {'mode': 'me2'}, 'variations': [{'attributes': [{'id': 'SELLER_SKU', 'value_name': 'VAR-1'}]}]},
     }
@@ -70,6 +70,10 @@ def test_import_pages_quotes_zero_currency_and_preserves_reference(app, client, 
         assert db.get(AccountItem, 'MLB222222222').quote == 0
         assert json.loads(db.get(AccountItem, 'MLB222222222').skus_json) == []
         assert db.get(AccountItem, 'MLB333333333').quote is None
+        assert db.get(ItemPublication, 'MLB123456789').catalog_listing == 1
+        assert db.get(ItemPublication, 'MLB222222222').catalog_listing == 0
+        assert db.get(ItemPublication, 'MLB333333333').catalog_listing is None
+        assert db.get(ItemPublication, 'MLB123456789').seen_run == record.seen_run
     assert pages[1]['scroll_id'] == 'cursor' and 'offset' not in pages[1]
     assert not any('dimensions' in x for x in quote_calls)
     page = client.get('/catalog').get_data(as_text=True)
