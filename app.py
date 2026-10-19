@@ -25,7 +25,7 @@ from werkzeug.security import check_password_hash
 from models import Base, BrowserSession, LoginGuard, OAuthState, Connection, PendingConnection, Product, AdTemplate, Listing, Freight, AccountItem, CatalogImport, SkuQuote
 from catalog_import import run_import
 from package_view import package_rows, sku_catalog, reference_signature
-from models import MeasureUpload
+from models import MeasureUpload, ItemPublication
 from measure_import import parse as parse_measures, ImportValidationError
 from freight_table import calculate as table_calculation, SOURCE_URL as TABLE_URL, CHECKED_ON as TABLE_DATE
 
@@ -375,10 +375,21 @@ def create_app(config=None):
     def current_comparison():
         items = connected_items()
         current_job = g.db.get(CatalogImport, 1)
+        publication_filter = request.args.get('publication', 'all')
+        if publication_filter not in ('all', 'catalog', 'traditional', 'unknown'):
+            return page_error('Tipo de anúncio inválido.')
+        publications = {p.mlb: p for p in g.db.scalars(select(ItemPublication).where(
+            ItemPublication.seller_id == g.db.get(Connection, 1).seller_id)).all()}
+        publication_labels = {'catalog': 'Catálogo', 'traditional': 'Tradicional', 'unknown': 'Não informado'}
         products = {p.sku: p for p in g.db.scalars(select(Product)).all()}
         search = request.args.get('q', '').strip()[:80]
         rows = []
         for item in items:
+            publication = publications.get(item.mlb)
+            flag = publication.catalog_listing if publication and publication.seen_run == item.seen_run else None
+            publication_kind = 'catalog' if flag == 1 else 'traditional' if flag == 0 else 'unknown'
+            if publication_filter != 'all' and publication_filter != publication_kind:
+                continue
             for sku in json.loads(item.skus_json) or ['']:
                 if search and search.casefold() not in sku.casefold() and search.upper() not in item.mlb:
                     continue
@@ -390,6 +401,7 @@ def create_app(config=None):
                 current_quote = item.quote if fresh_quote else None
                 difference = current_quote - expected if current_quote is not None and expected is not None else None
                 rows.append({'sku': sku, 'item': item, 'product': product, 'expected': expected,
+                             'publication_label': publication_labels[publication_kind],
                              'difference': difference, 'note': note,
                              'current_quote': current_quote,
                              'current_quote_note': item.quote_note if fresh_quote else 'Sem consulta nesta atualização; custo anterior não usado',
@@ -412,7 +424,8 @@ def create_app(config=None):
                                compared=len(complete), higher=sum(row['difference'] > 0 for row in complete),
                                pending=len(rows) - len(complete), page=page,
                                pages=max(1, (len(filtered) + 99) // 100), search=search, table_url=TABLE_URL, table_date=TABLE_DATE,
-                               counts=counts, result_filter=result_filter, filtered_total=len(filtered))
+                               counts=counts, result_filter=result_filter, filtered_total=len(filtered),
+                               publication_filter=publication_filter)
 
     @app.get('/catalog')
     @protected

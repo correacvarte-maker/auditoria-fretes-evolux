@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 import requests
 from sqlalchemy import select
 
-from models import AccountItem, CatalogImport, Connection
+from models import AccountItem, CatalogImport, Connection, ItemPublication
 
 API = 'https://api.mercadolibre.com'
 
@@ -230,6 +230,11 @@ def run_import(factory, cipher, token_request, store_tokens, run_id, seller_id):
                     record.quote_note, record.reference_note = quote_note, reference_note[:180]
                     record.synced_at, record.seen_run = int(time.time()), run_id
                     db.add(record)
+                    publication = db.get(ItemPublication, mlb) or ItemPublication(mlb=mlb)
+                    publication.seller_id, publication.seen_run = seller_id, run_id
+                    raw_catalog = item.get('catalog_listing')
+                    publication.catalog_listing = 1 if raw_catalog is True else 0 if raw_catalog is False else None
+                    db.add(publication)
                 processed += 1
                 quotes += int(cost is not None)
                 progress(processed=processed, quotes=quotes, failures=failures)

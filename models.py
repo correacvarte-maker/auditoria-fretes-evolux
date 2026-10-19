@@ -142,6 +142,14 @@ class CatalogImport(Base):
     updated_at = Column(Integer, nullable=False)
 
 
+class ItemPublication(Base):
+    __tablename__ = 'item_publication_types'
+    mlb = Column(String(32), primary_key=True)
+    seller_id = Column(String(32), nullable=False)
+    catalog_listing = Column(Integer)  # 1 catalog, 0 traditional, NULL unknown
+    seen_run = Column(String(64), nullable=False)
+
+
 class SkuQuote(Base):
     __tablename__ = 'sku_reference_quotes'
     mlb = Column(String(32), primary_key=True)
