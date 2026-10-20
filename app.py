@@ -435,8 +435,14 @@ def create_app(config=None):
             return page_error('Conecte a conta antes de consultar os anúncios.', 409)
         page = max(1, min(100000, int(request.args.get('page', '1'))))
         query = select(AccountItem).where(AccountItem.seller_id == connection.seller_id)
-        total = g.db.scalar(select(func.count()).select_from(query.subquery()))
-        records = g.db.scalars(query.order_by(AccountItem.mlb).offset((page - 1) * 100).limit(100)).all()
+        search = request.args.get('q', '').strip()[:80]
+        records = g.db.scalars(query.order_by(AccountItem.mlb)).all()
+        if search:
+            needle = search.casefold()
+            records = [item for item in records if needle in item.mlb.casefold()
+                       or any(needle in sku.casefold() for sku in json.loads(item.skus_json))]
+        total = len(records)
+        records = records[(page - 1) * 100:page * 100]
         products = {p.sku: p for p in g.db.scalars(select(Product)).all()}
         rows = []
         for item in records:
@@ -447,7 +453,7 @@ def create_app(config=None):
                          'expected': expected, 'reference_note': 'Tabela a partir de R$ 200 · ' + TABLE_DATE if product else 'Veja a comparação por SKU após informar suas medidas',
                          'difference': item.quote - expected if item.quote is not None and expected is not None else None})
         return render_template('catalog.html', rows=rows, total=total, page=page,
-                               pages=max(1, (total + 99) // 100), job=g.db.get(CatalogImport, 1))
+                               pages=max(1, (total + 99) // 100), job=g.db.get(CatalogImport, 1), search=search)
 
     @app.post('/catalog/import')
     @protected
