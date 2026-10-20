@@ -1,5 +1,13 @@
 # Auditoria de Fretes — Linha Evolux
 
+## Preços e cálculo por faixa — regra atualizada em 20/10/2026
+
+Esta regra substitui a referência fixa de R$200 descrita no histórico abaixo. As duas colunas de preço consultam `GET /items/{MLB}/sale_price?context=channel_marketplace&quantity=1`: `regular_amount` é o preço cheio quando existe desconto, e `amount` é o preço vigente. Sem promoção confirmada, o preço cheio é `amount` e a promoção aparece como “Sem promoção”. Consulta indisponível, moeda diferente de BRL ou dados incompletos não viram promoção fictícia. Preços são vinculados ao vendedor e à mesma execução do anúncio; uma falha nova não reaproveita uma promoção antiga.
+
+O cálculo usa `max(L*A*C/6000, peso bruto)` e escolhe a coluna da **tabela padrão** pelo preço vigente (`amount`), promocional quando confirmado, em uma das oito faixas. As faixas são [0,19), [19,49), [49,79), [79,100), [100,120), [120,150), [150,200) e >=200 reais. Até R$18,99 aplica-se o teto de metade do preço, sem excedê-lo por arredondamento. A faixa e o preço-base aparecem na comparação; ausência de preço ou medida deixa o cálculo pendente. A prévia da planilha mostra os pesos; o frete só é calculado por anúncio, pois o mesmo SKU pode ter vários preços.
+
+Tarifas de referência em `freight_rates.json`, conferidas no [link oficial](https://www.mercadolivre.com.br/ajuda/40538) em 20/10/2026. A tabela separada de frete grátis rápido opcional abaixo de R$79 e exceções de categoria/logística exigem revisão; não são inferidas de um indicador genérico de frete grátis. Fontes de preços: [API oficial](https://developers.mercadolivre.com.br/en_us/price-apl). Não há alteração de preços, promoções ou anúncios na conta.
+
 MVP web privado para cadastro de produtos, anúncios, modelos e auditoria de custos de frete. Python 3.12, Flask, PostgreSQL e HTML responsivo. O repositório era composto apenas por este README antes da implementação.
 
 Ambiente de demonstração no Render: [Auditoria de Fretes](https://auditoria-fretes-evolux.onrender.com). Callback OAuth real: `https://auditoria-fretes-evolux.onrender.com/oauth/callback`. Login e configuração ficam privados; nenhuma credencial deve ser publicada neste repositório.

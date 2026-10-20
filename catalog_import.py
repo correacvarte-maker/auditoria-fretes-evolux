@@ -7,7 +7,8 @@ from decimal import Decimal, InvalidOperation
 import requests
 from sqlalchemy import select
 
-from models import AccountItem, CatalogImport, Connection, ItemPublication
+from models import AccountItem, CatalogImport, Connection, ItemPublication, ItemPrice
+from listing_prices import read_prices
 
 API = 'https://api.mercadolibre.com'
 
@@ -208,7 +209,15 @@ def run_import(factory, cipher, token_request, store_tokens, run_id, seller_id):
                     continue
                 progress(phase=f'Consultando frete de {mlb} ({processed + 1}/{len(ids)})')
                 skus, custom, dimensions = item_fields(item)
-                cost, weight, quote_note = quote(item)
+                try:
+                    prices = read_prices(api_get('/items/' + mlb + '/sale_price',
+                                                {'context': 'channel_marketplace', 'quantity': 1}))
+                except requests.RequestException as price_error:
+                    if isinstance(price_error, requests.HTTPError) and price_error.response is not None and price_error.response.status_code == 401:
+                        raise
+                    prices = read_prices(None)
+                quote_item = {**item, 'price': prices['effective']} if prices['effective'] is not None else item
+                cost, weight, quote_note = quote(quote_item)
                 expected, reference_note = None, 'Referência calculada no painel pela tabela a partir de R$ 200'
                 with factory.begin() as db:
                     connection = db.get(Connection, 1)
@@ -225,7 +234,7 @@ def run_import(factory, cipher, token_request, store_tokens, run_id, seller_id):
                     record.shipping_mode = str(shipping.get('mode') or 'não informado')[:40]
                     record.logistic_type = str(shipping.get('logistic_type') or 'não informado')[:40]
                     record.free_shipping = int(bool(shipping.get('free_shipping')))
-                    record.price = money(item.get('price')) if item.get('currency_id') == 'BRL' else None
+                    record.price = prices['effective'] if prices['effective'] is not None else (money(item.get('price')) if item.get('currency_id') == 'BRL' else None)
                     record.quote, record.expected_quote, record.billable_weight = cost, expected, weight
                     record.quote_note, record.reference_note = quote_note, reference_note[:180]
                     record.synced_at, record.seen_run = int(time.time()), run_id
@@ -235,6 +244,12 @@ def run_import(factory, cipher, token_request, store_tokens, run_id, seller_id):
                     raw_catalog = item.get('catalog_listing')
                     publication.catalog_listing = 1 if raw_catalog is True else 0 if raw_catalog is False else None
                     db.add(publication)
+                    price_record = db.get(ItemPrice, mlb) or ItemPrice(mlb=mlb)
+                    price_record.seller_id, price_record.seen_run = seller_id, run_id
+                    price_record.consulted_at = int(time.time())
+                    for field, value in prices.items():
+                        setattr(price_record, field, value)
+                    db.add(price_record)
                 processed += 1
                 quotes += int(cost is not None)
                 progress(processed=processed, quotes=quotes, failures=failures)

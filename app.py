@@ -25,7 +25,8 @@ from werkzeug.security import check_password_hash
 from models import Base, BrowserSession, LoginGuard, OAuthState, Connection, PendingConnection, Product, AdTemplate, Listing, Freight, AccountItem, CatalogImport, SkuQuote
 from catalog_import import run_import
 from package_view import package_rows, sku_catalog, reference_signature
-from models import MeasureUpload, ItemPublication
+from models import MeasureUpload, ItemPublication, ItemPrice
+from listing_prices import price_columns
 from measure_import import parse as parse_measures, ImportValidationError
 from freight_table import calculate as table_calculation, SOURCE_URL as TABLE_URL, CHECKED_ON as TABLE_DATE
 
@@ -258,12 +259,18 @@ def create_app(config=None):
             return "'" + value if value.lstrip().startswith(('=', '+', '-', '@')) or value.startswith(('\t', '\r', '\n')) else value
         output = io.StringIO()
         writer = csv.writer(output, delimiter=';', lineterminator='\r\n')
-        writer.writerow(['SKU no Mercado Livre', 'MLB', 'Título', 'Status', 'Preço do anúncio (BRL)',
+        writer.writerow(['SKU no Mercado Livre', 'MLB', 'Título', 'Status', 'Preço cheio (BRL)',
+                         'Preço promocional (BRL)', 'Preço vigente (BRL)', 'Situação do preço',
                          'Custo atual de frete (BRL)', 'Envio', 'Logística', 'Grátis ao comprador',
                          'Consulta (Brasília)', 'Fonte / disponibilidade'])
-        for item in connected_items():
+        items = connected_items()
+        prices = {p.mlb: p for p in g.db.scalars(select(ItemPrice).where(ItemPrice.seller_id == g.db.get(Connection, 1).seller_id)).all()}
+        for item in items:
+            price_data = price_columns(item, prices.get(item.mlb))
             writer.writerow([safe_cell(', '.join(json.loads(item.skus_json))), item.mlb, safe_cell(item.title),
-                safe_cell(item.status), format(item.price, '.2f').replace('.', ',') if item.price is not None else '',
+                safe_cell(item.status), *[format(price_data[key], '.2f').replace('.', ',') if price_data[key] is not None else ''
+                                          for key in ('full_price', 'promotional_price', 'effective_price')],
+                safe_cell(price_data['price_note']),
                 format(item.quote, '.2f').replace('.', ',') if item.quote is not None else '',
                 safe_cell(item.shipping_mode), safe_cell(item.logistic_type), 'Sim' if item.free_shipping else 'Não',
                 time.strftime('%d/%m/%Y %H:%M', time.gmtime(item.synced_at - 10800)), safe_cell(item.quote_note)])
@@ -375,6 +382,7 @@ def create_app(config=None):
     def current_comparison():
         items = connected_items()
         current_job = g.db.get(CatalogImport, 1)
+        prices = {p.mlb: p for p in g.db.scalars(select(ItemPrice).where(ItemPrice.seller_id == g.db.get(Connection, 1).seller_id)).all()}
         publication_filter = request.args.get('publication', 'all')
         if publication_filter not in ('all', 'catalog', 'traditional', 'unknown'):
             return page_error('Tipo de anúncio inválido.')
@@ -394,14 +402,16 @@ def create_app(config=None):
                 if search and search.casefold() not in sku.casefold() and search.upper() not in item.mlb:
                     continue
                 product = products.get(sku)
-                calculation = table_calculation(product) if product else {}
+                price_data = price_columns(item, prices.get(item.mlb))
+                calculation = table_calculation(product, price_data['effective_price']) if product else {}
                 expected = calculation.get('expected')
-                note = calculation.get('band', 'Preencha suas medidas para este SKU')
+                note = (calculation.get('band', '') if expected is not None else 'Preço vigente indisponível; atualize os anúncios') if product else 'Preencha suas medidas para este SKU'
                 fresh_quote = not current_job or item.seen_run == current_job.run_id
                 current_quote = item.quote if fresh_quote else None
                 difference = current_quote - expected if current_quote is not None and expected is not None else None
                 rows.append({'sku': sku, 'item': item, 'product': product, 'expected': expected,
                              'publication_label': publication_labels[publication_kind],
+                             **price_data,
                              'difference': difference, 'note': note,
                              'current_quote': current_quote,
                              'current_quote_note': item.quote_note if fresh_quote else 'Sem consulta nesta atualização; custo anterior não usado',
@@ -443,14 +453,18 @@ def create_app(config=None):
                        or any(needle in sku.casefold() for sku in json.loads(item.skus_json))]
         total = len(records)
         records = records[(page - 1) * 100:page * 100]
+        prices = {p.mlb: p for p in g.db.scalars(select(ItemPrice).where(ItemPrice.seller_id == connection.seller_id)).all()}
         products = {p.sku: p for p in g.db.scalars(select(Product)).all()}
         rows = []
         for item in records:
             skus = json.loads(item.skus_json)
             product = products.get(skus[0]) if len(skus) == 1 else None
-            expected = table_calculation(product)['expected'] if product else None
+            price_data = price_columns(item, prices.get(item.mlb))
+            calculation = table_calculation(product, price_data['effective_price']) if product else {}
+            expected = calculation.get('expected')
             rows.append({'item': item, 'skus': ', '.join(skus), 'custom': ', '.join(json.loads(item.custom_fields_json)),
-                         'expected': expected, 'reference_note': 'Tabela a partir de R$ 200 · ' + TABLE_DATE if product else 'Veja a comparação por SKU após informar suas medidas',
+                         **price_data, 'price_band': calculation.get('price_band'),
+                         'expected': expected, 'reference_note': ('Tabela ' + calculation['price_band'] + ' · ' + TABLE_DATE) if expected is not None else 'Consulte preços e informe suas medidas para calcular por faixa',
                          'difference': item.quote - expected if item.quote is not None and expected is not None else None})
         return render_template('catalog.html', rows=rows, total=total, page=page,
                                pages=max(1, (total + 99) // 100), job=g.db.get(CatalogImport, 1), search=search)

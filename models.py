@@ -150,6 +150,19 @@ class ItemPublication(Base):
     seen_run = Column(String(64), nullable=False)
 
 
+class ItemPrice(Base):
+    __tablename__ = 'item_marketplace_prices'
+    mlb = Column(String(32), primary_key=True)
+    seller_id = Column(String(32), nullable=False)
+    full = Column(Numeric(12, 2))
+    promotional = Column(Numeric(12, 2))
+    effective = Column(Numeric(12, 2))
+    state = Column(String(30), nullable=False)
+    note = Column(String(180), nullable=False)
+    seen_run = Column(String(64), nullable=False)
+    consulted_at = Column(Integer, nullable=False)
+
+
 class SkuQuote(Base):
     __tablename__ = 'sku_reference_quotes'
     mlb = Column(String(32), primary_key=True)
