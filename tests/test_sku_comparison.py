@@ -4,7 +4,12 @@ from decimal import Decimal
 from sqlalchemy import select
 from test_app import app, client, login, post
 from test_catalog import connect, Response
-from models import AccountItem, Product, SkuQuote
+from models import AccountItem, Product, SkuQuote, ItemPrice
+
+
+def add_price(db, item, price=Decimal(200)):
+    db.add(ItemPrice(mlb=item.mlb,seller_id=item.seller_id,full=price,effective=price,promotional=None,
+                     state='standard',note='Preço unitário da API',seen_run=item.seen_run,consulted_at=1))
 
 
 def seed(app):
@@ -14,7 +19,8 @@ def seed(app):
             listing_type='gold_pro', skus_json='["A", "B"]', custom_fields_json='[]',
             dimensions='SELLER_PACKAGE_WIDTH: 999 cm\nSELLER_PACKAGE_WEIGHT: 9999 g',
             shipping_mode='me2', logistic_type='cross_docking', free_shipping=1,
-            price=100, quote=30, quote_note='Cotação atual', reference_note='none', seen_run='initial', synced_at=1))
+            price=200, quote=30, quote_note='Cotação atual', reference_note='none', seen_run='initial', synced_at=1))
+        add_price(db, type('Item',(),{'mlb':'MLB123456789','seller_id':'456','seen_run':'initial'})())
 
 
 def save(client, sku, width='20', weight='1.200'):
@@ -58,6 +64,9 @@ def test_per_sku_quotes_for_variations_and_invalidate_on_edit(app, client, monke
             return Response({'results': ids, 'scroll_id': 'scan', 'paging': {'total': 1}})
         if url.endswith('/items'):
             return Response([{'code': 200, 'body': item}])
+        if url.endswith('/sale_price'):
+            assert params == {'context':'channel_marketplace','quantity':1}
+            return Response({'currency_id':'BRL','amount':200,'regular_amount':None})
         calls.append(params)
         cost = 30 if 'item_id' in params else 10 if params['dimensions'] == '10.00x20.00x30.00,1200' else 15
         return Response({'coverage': {'all_country': {'currency_id': 'BRL', 'list_cost': cost, 'billable_weight': 2000}}})
@@ -68,7 +77,7 @@ def test_per_sku_quotes_for_variations_and_invalidate_on_edit(app, client, monke
         assert db.get(SkuQuote, ('MLB123456789', 'B')) is None
         assert db.scalar(select(Product).where(Product.sku == 'B')).weight == Decimal('2.500')
     assert not any('dimensions' in c for c in calls)
-    assert all(c['item_price'] == 100 and c['logistic_type'] == 'cross_docking' for c in calls)
+    assert all(c['item_price'] == 200 and c['logistic_type'] == 'cross_docking' for c in calls)
     page_a = client.get('/catalog/comparison?q=A').get_data(as_text=True)
     assert 'R$ 30,00' in page_a and 'R$ 25,45' in page_a and 'R$ 4,55' in page_a
     page_b = client.get('/catalog/comparison?q=B').get_data(as_text=True)

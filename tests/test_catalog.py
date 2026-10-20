@@ -52,6 +52,9 @@ def test_import_pages_quotes_zero_currency_and_preserves_reference(app, client, 
             return Response({'results': batch, 'scroll_id': 'cursor', 'paging': {'total': 3}})
         if url.endswith('/items'):
             return Response([{'code': 200, 'body': items[x]} for x in params['ids'].split(',')])
+        if url.endswith('/sale_price'):
+            item=items[url.split('/')[-2]]
+            return Response({'currency_id':item.get('currency_id'), 'amount':item.get('price'), 'regular_amount':None})
         if url.endswith('/shipping_options/free'):
             quote_calls.append(params)
             if params.get('item_id') == 'MLB333333333':
@@ -77,7 +80,7 @@ def test_import_pages_quotes_zero_currency_and_preserves_reference(app, client, 
     assert pages[1]['scroll_id'] == 'cursor' and 'offset' not in pages[1]
     assert not any('dimensions' in x for x in quote_calls)
     page = client.get('/catalog').get_data(as_text=True)
-    assert 'R$ 25,45' in page and 'NOT-A-SKU' in page and 'SKU não informado' in page
+    assert 'R$ 17,15' in page and 'NOT-A-SKU' in page and 'SKU não informado' in page
     assert 'R$ 0,00' in page and 'não comprova' in page
     assert post(client, '/catalog/import', {}).status_code == 302
     with app.extensions['db_factory']() as db:
@@ -97,6 +100,8 @@ def test_import_can_scan_more_than_1000_and_rejects_foreign_items(app, client, m
             page = ids[offset:offset + 50]
             offset += 50
             return Response({'results': page, 'scroll_id': 'scan', 'paging': {'total': len(ids)}})
+        if url.endswith('/sale_price'):
+            return Response({'currency_id':'BRL','amount':100,'regular_amount':None})
         return Response([{'code': 200, 'body': {'id': mlb, 'seller_id': 999 if mlb == ids[0] else 456,
                          'title': 'Item', 'shipping': {'mode': 'custom'}}} for mlb in params['ids'].split(',')])
     monkeypatch.setattr('catalog_import.requests.get', get)
@@ -166,6 +171,8 @@ def test_contextual_quote_after_item_quote_rejection(app, client, monkeypatch):
             return Response({'results': result, 'scroll_id': 'scan', 'paging': {'total': 1}})
         if url.endswith('/items'):
             return Response([{'code': 200, 'body': item}])
+        if url.endswith('/sale_price'):
+            return Response({'currency_id':'BRL','amount':100,'regular_amount':None})
         if 'item_id' in params:
             return Response({'code': 'bad_request'}, 400)
         assert params['dimensions'] == '10x20x30,1200'

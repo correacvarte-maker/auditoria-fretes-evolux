@@ -44,15 +44,15 @@ def test_all_weight_boundaries_and_unrounded_cubic():
         if upper is None:
             continue
         product = SimpleNamespace(width=Decimal(1), height=Decimal(1), length=Decimal(1), weight=upper)
-        assert calculate(product)['expected'] == cost
+        assert calculate(product, Decimal(200))['expected'] == cost
         product.weight = upper + Decimal('.0000001')
-        assert calculate(product)['expected'] == BANDS[n + 1][1]
+        assert calculate(product, Decimal(200))['expected'] == BANDS[n + 1][1]
     product = SimpleNamespace(width=Decimal(120), height=Decimal(10), length=Decimal(10), weight=Decimal('1.9'))
-    assert calculate(product)['considered_weight'] == 2
-    assert calculate(product)['expected'] == Decimal('25.55')
+    assert calculate(product, Decimal(200))['considered_weight'] == 2
+    assert calculate(product, Decimal(200))['expected'] == Decimal('25.55')
     product.weight = Decimal(3)
-    assert calculate(product)['considered_weight'] == 3
-    assert calculate(product)['expected'] == Decimal('27.05')
+    assert calculate(product, Decimal(200))['considered_weight'] == 3
+    assert calculate(product, Decimal(200))['expected'] == Decimal('27.05')
 
 
 def test_bulk_preview_is_atomic_and_recalculates_on_confirmation(app, client):
@@ -61,7 +61,7 @@ def test_bulk_preview_is_atomic_and_recalculates_on_confirmation(app, client):
     response = upload(client, 'A;120;10;10;1,900\nB;40;10;30;2,500\n')
     assert response.status_code == 200
     text = response.get_data(as_text=True)
-    assert '2 SKUs válidos' in text and 'R$ 25,55' in text and 'R$ 27,05' in text
+    assert '2 SKUs válidos' in text and 'Calculado por anúncio' in text
     with app.extensions['db_factory']() as db:
         assert db.scalar(select(Product)) is None
     assert post(client, '/catalog/measures/confirm', {}).status_code == 302
@@ -129,8 +129,8 @@ def test_xlsx_values_formula_numeric_sku_and_zip_limits():
         parse(FileStorage(stream=io.BytesIO(b'x' * (2 * 1024 * 1024 + 1)), filename='x.csv'), {'001'})
 
 
-def test_actual_zero_vs_missing_and_reference_independent_of_price(app, client):
-    from models import AccountItem
+def test_actual_zero_vs_missing_and_reference_uses_current_price(app, client):
+    from models import AccountItem, ItemPrice
     login(client)
     seed(app)
     upload(client, 'A;120;10;10;1\n')
@@ -138,17 +138,18 @@ def test_actual_zero_vs_missing_and_reference_independent_of_price(app, client):
     with app.extensions['db_factory'].begin() as db:
         item = db.get(AccountItem, 'MLB123456789')
         item.quote, item.price = Decimal(0), Decimal(50)
+        db.get(ItemPrice, item.mlb).effective = Decimal(50)
     text = client.get('/catalog/comparison?q=A').get_data(as_text=True)
-    assert 'R$ 25,55' in text and 'R$ -25,55' in text
+    assert 'R$ 8,75' in text and 'R$ -8,75' in text
     with app.extensions['db_factory'].begin() as db:
         db.get(AccountItem, 'MLB123456789').quote = None
     text = client.get('/catalog/comparison?q=A').get_data(as_text=True)
-    assert 'Indisponível' in text and 'R$ -25,55' not in text
+    assert 'Indisponível' in text and 'R$ -8,75' not in text
 
 
 def test_large_upload_and_missing_file_invalidates_previous_preview(app, client):
     import json
-    from models import AccountItem
+    from models import AccountItem, ItemPrice
     login(client)
     seed(app)
     codes = [f'SKU-{n:05}' for n in range(4000)]

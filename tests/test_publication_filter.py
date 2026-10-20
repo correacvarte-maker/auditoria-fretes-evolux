@@ -1,5 +1,5 @@
 from test_app import app, client, login
-from test_sku_comparison import seed
+from test_sku_comparison import seed, add_price
 from models import ItemPublication, AccountItem, Product
 
 
@@ -14,7 +14,9 @@ def test_type_filter_combines_with_cost_search_and_preserves_links(app, client):
             mlb='MLB12345678'+str(n)
             values={column.name:getattr(source,column.name) for column in AccountItem.__table__.columns}
             values.update(mlb=mlb)
-            db.add(AccountItem(**values))
+            item=AccountItem(**values)
+            db.add(item)
+            add_price(db,item)
             db.add(ItemPublication(mlb=mlb,seller_id='456',catalog_listing=kind,seen_run='initial'))
     for kind, mlb in [('catalog','MLB123456780'),('traditional','MLB123456781'),('unknown','MLB123456782')]:
         page=client.get('/catalog/comparison?result=more&publication='+kind+'&q=A').get_data(as_text=True)

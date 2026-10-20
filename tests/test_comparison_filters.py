@@ -1,7 +1,7 @@
 from decimal import Decimal
 from sqlalchemy import select
 from test_app import app, client, login, post
-from test_sku_comparison import seed
+from test_sku_comparison import seed, add_price
 from models import AccountItem, Product
 
 
@@ -15,7 +15,9 @@ def test_filters_search_zero_missing_and_cent_accuracy(app, client):
                                    ('3','D',None), ('4','E',Decimal(0)), ('5','F',Decimal('25.56'))]:
             values = {column.name: getattr(source,column.name) for column in AccountItem.__table__.columns}
             values.update(mlb='MLB12345678'+suffix, skus_json='["'+sku+'"]', quote=quote)
-            db.add(AccountItem(**values))
+            item=AccountItem(**values)
+            db.add(item)
+            add_price(db,item)
         for sku in 'ABCDEF':
             db.add(Product(sku=sku,name=sku,width=120,height=10,length=10,weight=1))
     cases = {'more':['A','F'], 'less':['B','E'], 'correct':['C'], 'pending':['D']}
